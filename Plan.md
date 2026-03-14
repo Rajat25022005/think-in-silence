@@ -1,32 +1,61 @@
-# Think-in-Silence — Complete Build Plan
+# Think-in-Silence — Revised Build Plan (v2)
 
-> **Profile:** Intermediate ML · Cloud GPU · Deep understanding + Portfolio + Research  
-> **Duration:** 28 days across 6 phases
-
----
-
-## The Big Picture
-
-You are building a model that reasons entirely in vector space — no chain-of-thought tokens,
-no reinforcement learning, no decoder. A question gets encoded into a 256-dimensional vector.
-A learnable "thought vector" passes through K recurrent attention steps, each silently refining
-it by reading the question context. The final thought is projected into a prediction and trained
-to match the teacher's answer embedding using simple MSE loss.
-
-The key innovation: K — the number of thinking steps — is adjustable at inference time
-without retraining. More steps = more thinking = better answers, provably.
+> **Profile:** Idea-first builder · AI-assisted implementation · Research + Portfolio + Paper  
+> **Duration:** 42 days across 7 phases  
+> **Goal:** Latent reasoning model with swappable backbone, generative decoder, synthetic data pipeline, and published paper
 
 ---
 
-## How It Compares to Prior Work
+## What Changed From v1
 
-| Feature | Quiet-STaR | Coconut | Think-in-Silence |
-|---|---|---|---|
-| Reasoning medium | Token vocabulary | LM hidden states | Dedicated latent space |
-| Training signal | REINFORCE (RL) | Token supervision | JEPA MSE — no RL |
-| CoT labels needed | No | Partial | No |
-| K adjustable at inference | No | No | Yes |
-| Backbone modified | Yes | Yes | No — fully frozen |
+| v1 Plan | v2 Plan |
+|---|---|
+| DistilBERT hardcoded | Swappable backbone (BGE-Large → LLaMA) |
+| 5 public datasets only | 250GB corpus + synthetic QA pipeline |
+| Retrieval only (Recall@K) | Retrieval + Text generation (BLEU, ROUGE) |
+| No decoder | 3-stage training with decoder |
+| 28 days | 42 days (more experiments, more impact) |
+| Single config | Ablation configs, multi-stage configs |
+| No tests | Full test suite |
+
+---
+
+## The Big Picture (Unchanged, Strengthened)
+
+A model that reasons entirely in vector space.  
+Question → encoded context → K silent thought steps → generated answer.
+
+**The central claim:** More thinking steps = better answers.  
+Provable. Adjustable at inference. No retraining needed.
+
+**What's new in v2:**
+- The model now *generates* answers as text, not just predicts embeddings
+- The backbone is swappable — start with BGE-Large, scale to LLaMA
+- The dataset is yours — synthesized from 250GB of raw text
+- The experiments are stronger — generation quality proves latent reasoning more convincingly than retrieval alone
+
+---
+
+## How You'll Build This
+
+Since you work best at the ideas and direction level:
+
+```
+Your job:          Understand every design decision
+                   Direct what gets built and why
+                   Evaluate results and know what they mean
+                   Write the paper
+
+AI's job:          Implement what you specify
+                   Write boilerplate and tests
+                   Debug syntax errors
+                   Convert your pseudocode to real code
+
+The rule:          Never let AI write something you
+                   can't explain line by line afterward
+                   Read everything it writes
+                   Ask why until you understand
+```
 
 ---
 
@@ -34,566 +63,1128 @@ without retraining. More steps = more thinking = better answers, provably.
 
 | Phase | Focus | Days |
 |---|---|---|
-| 1 | Foundations | 1–3 |
-| 2 | Core Architecture | 4–8 |
-| 3 | Data Pipeline | 9–11 |
-| 4 | Training System | 12–16 |
-| 5 | Evaluation & Experiments | 17–22 |
-| 6 | Portfolio Polish | 23–28 |
+| 1 | Foundations + Environment | 1–4 |
+| 2 | Core Architecture | 5–10 |
+| 3 | Backbone System | 11–14 |
+| 4 | Data Pipeline + Synthesis | 15–20 |
+| 5 | Three-Stage Training | 21–28 |
+| 6 | Evaluation + Experiments | 29–36 |
+| 7 | Paper + Portfolio Polish | 37–42 |
 
 ---
 
 # Phase 1 — Foundations
-> **Days 1–3 · Goal: Working environment, mathematical intuition, first forward pass**
-
-## Day 1 — Project Setup
-
-### 1.1 Create the Folder Structure First
-Before writing a single line of model code, set up the entire project directory.
-
-Top-level folders:
-- `src/models/` — all model architecture files
-- `src/datasets/` — data loading and preprocessing
-- `src/training/` — training loop and utilities
-- `src/eval/` — evaluation and visualization
-- `configs/` — YAML configuration files
-- `checkpoints/` — saved model weights (auto-created at runtime)
-- `results/` — plots and metric outputs
-- `notebooks/` — experimentation and sanity checks
-
-Root-level files: `main.py`, `eval.py`, `run.sh`, `requirements.txt`.
-Each `src/` subfolder needs an `__init__.py` to be importable as a Python package.
-
-### 1.2 Pin Your Dependencies
-Create `requirements.txt` with exact version numbers for full reproducibility.
-
-Key libraries:
-- **PyTorch 2.2.0** — core deep learning framework
-- **Transformers 4.38.0** — for DistilBERT encoder
-- **Datasets 2.18.0** — HuggingFace streaming dataset loader
-- **PyYAML 6.0.1** — configuration file parsing
-- **NumPy 1.26.4** — numerical operations
-- **Scikit-learn 1.4.1** — linear probing and t-SNE in evaluation
-- **Matplotlib 3.8.3 + Seaborn 0.13.2** — visualization
-- **tqdm 4.66.2** — progress bars
-- **WandB 0.16.4** — experiment tracking (free tier sufficient)
-- **einops 0.7.0** — clean tensor reshape operations
-
-### 1.3 Write the Base Configuration File
-Create `configs/base.yaml` — single source of truth for all hyperparameters.
-Never hardcode numbers inside model files.
-
-**Model section:** `n_steps: 8`, `proj_dim: 256`, `n_heads: 4` (must divide proj_dim),
-`ffn_dim: 512` (2x proj_dim), `dropout: 0.1`, `shared_weights: false`.
-
-**Training section:** `max_steps: 100000`, `batch_size: 64`, `lr: 1.0e-4`,
-`warmup_steps: 2000`, `grad_clip: 1.0`, `ema_momentum_start: 0.990`,
-`ema_momentum_end: 0.9999`, `log_every: 100`, `ckpt_every: 5000`,
-`ckpt_dir: "checkpoints/base"`.
-
-**Eval section:** `k_values: [1, 2, 4, 8, 16]`, `recall_at: [1, 5, 10]`,
-`n_probe_samples: 2000`, `tsne_perplexity: 30`.
-
-**Data section:** `max_q_len: 128`, `max_a_len: 64`.
+> **Days 1–4 · Goal: Environment, math intuition, folder structure, first prototype**
 
 ---
 
-## Day 2 — Understand the Core Math
-> Do not skip this day. This separates copy-pasting from genuine understanding.
+## Day 1 — Project Structure
 
-### Concept 1: Embeddings
-Text → a fixed-size list of numbers. DistilBERT converts each token into a 768-dim vector.
-Similar sentences produce similar vectors. To get one vector per sentence, mean-pool
-across all token positions, ignoring padding via the attention mask.
+Create the full folder tree before writing a single line of model code.
 
-**Action:** Load DistilBERT in a notebook. Pass a sentence through it. Print the shape of
-`last_hidden_state`. Mean-pool it. Verify you get shape `(1, 768)`.
-
-### Concept 2: Attention
-Formula: `Attention(Q,K,V) = softmax(QKᵀ / √d) × V`
-- Q = "what am I looking for?"
-- K = "what do I offer?"
-- V = "what do I give if selected?"
-
-**Self-attention:** Q, K, V all from the thought. Thought refines itself.
-**Cross-attention:** Q from thought, K and V from question context. Thought reads the question.
-
-**Action:** In a notebook, manually compute cross-attention between a small thought vector
-`(1, 1, 256)` and short context `(1, 10, 256)`. Print attention weights to see which tokens
-are attended to. Understand the shape flow.
-
-### Concept 3: EMA
-Formula: `teacher = m × teacher + (1-m) × student`
-
-With m=0.996, teacher moves 0.4% toward student per step — very slowly.
-Provides stable regression targets without contrastive negatives or RL.
-
-Momentum schedule: starts at 0.990 (faster updates early), increases to 0.9999
-(nearly frozen late). Cosine curve. Implement this correctly.
-
-**Action:** Simulate 100 EMA steps with a toy scalar value. Plot teacher evolution.
-Compare momentum=0.99 vs 0.9999 stability.
+```
+think-in-silence/
+│
+├── src/
+│   ├── models/
+│   │   ├── __init__.py
+│   │   ├── encoder.py
+│   │   ├── thought_block.py
+│   │   ├── thought_module.py
+│   │   ├── decoder.py               ← NEW
+│   │   ├── lc_thought.py
+│   │   └── backbones/               ← NEW FOLDER
+│   │       ├── __init__.py
+│   │       ├── distilbert.py
+│   │       ├── bge_large.py
+│   │       └── llama_encoder.py
+│   │
+│   ├── datasets/
+│   │   ├── __init__.py
+│   │   ├── qa_datasets.py
+│   │   ├── synthetic/               ← NEW FOLDER
+│   │   │   ├── __init__.py
+│   │   │   ├── generator.py
+│   │   │   ├── filter.py
+│   │   │   └── pipeline.py
+│   │   └── preprocessing/           ← NEW FOLDER
+│   │       ├── __init__.py
+│   │       ├── cleaner.py
+│   │       ├── difficulty_filter.py
+│   │       └── stats.py
+│   │
+│   ├── training/
+│   │   ├── __init__.py
+│   │   ├── trainer.py
+│   │   ├── decoder_trainer.py       ← NEW
+│   │   ├── finetune_trainer.py      ← NEW
+│   │   ├── losses.py                ← NEW
+│   │   └── schedulers.py            ← NEW
+│   │
+│   ├── eval/
+│   │   ├── __init__.py
+│   │   ├── evaluator.py
+│   │   ├── generation_eval.py       ← NEW
+│   │   ├── probing.py               ← NEW
+│   │   ├── visualise.py
+│   │   └── benchmarks/              ← NEW FOLDER
+│   │       ├── __init__.py
+│   │       ├── gsm8k_eval.py
+│   │       ├── hotpot_eval.py
+│   │       └── arc_eval.py
+│   │
+│   └── utils/                       ← NEW FOLDER
+│       ├── __init__.py
+│       ├── checkpoint.py
+│       ├── logging.py
+│       ├── seed.py
+│       └── device.py
+│
+├── configs/
+│   ├── base.yaml
+│   ├── bge_large.yaml               ← NEW
+│   ├── llama_encoder.yaml           ← NEW
+│   ├── decoder.yaml                 ← NEW
+│   ├── ablations/                   ← NEW FOLDER
+│   │   ├── shared_weights.yaml
+│   │   ├── dim_256.yaml
+│   │   ├── dim_512.yaml
+│   │   └── k_steps.yaml
+│   └── experiment/                  ← NEW FOLDER
+│       ├── small_run.yaml
+│       └── full_run.yaml
+│
+├── scripts/                         ← NEW FOLDER
+│   ├── prepare_data.sh
+│   ├── generate_synthetic.sh
+│   ├── train_stage1.sh
+│   ├── train_stage2.sh
+│   ├── train_stage3.sh
+│   ├── run_evals.sh
+│   └── upload_checkpoint.sh
+│
+├── notebooks/
+│   ├── 01_sanity_checks.ipynb
+│   ├── 02_data_exploration.ipynb    ← NEW
+│   ├── 03_backbone_comparison.ipynb ← NEW
+│   ├── 04_kscaling_analysis.ipynb   ← NEW
+│   ├── 05_decoder_outputs.ipynb     ← NEW
+│   └── 06_paper_figures.ipynb       ← NEW
+│
+├── tests/                           ← NEW FOLDER
+│   ├── test_encoder.py
+│   ├── test_thought_block.py
+│   ├── test_thought_module.py
+│   ├── test_decoder.py
+│   ├── test_dataloader.py
+│   └── test_ema.py
+│
+├── paper/                           ← NEW FOLDER
+│   ├── main.tex
+│   ├── figures/
+│   └── refs.bib
+│
+├── checkpoints/
+│   ├── stage1/
+│   ├── stage2/
+│   └── stage3/
+│
+├── results/
+│   ├── metrics/
+│   └── plots/
+│
+├── main.py
+├── train_decoder.py                 ← NEW
+├── finetune.py                      ← NEW
+├── eval.py
+├── run.sh
+├── requirements.txt
+├── README.md
+└── LICENSE
+```
 
 ---
 
-## Day 3 — 50-Line End-to-End Prototype
-Build a complete working system in a single notebook cell before writing clean modular code.
+## Day 1 — Requirements File
 
-Five steps in sequence:
-1. Load frozen DistilBERT, disable all its gradients
-2. Create two linear projection heads (question → 256-dim sequence, answer → 256-dim pooled)
-3. Build a minimal ThoughtBlock with self-attention, cross-attention, and FFN
-4. Encode a question, project it, loop through ThoughtBlock K=4 times
-5. Project final thought through linear predictor, compute MSE against projected answer,
-   call `loss.backward()`
+Pin exact versions. Never leave versions unspecified.
 
-**Success criterion:** Finite loss printed, no gradient errors.
+```
+torch==2.2.0
+transformers==4.38.0
+sentence-transformers==2.5.0       ← NEW: for BGE-Large
+datasets==2.18.0
+pyyaml==6.0.1
+numpy==1.26.4
+scikit-learn==1.4.1
+matplotlib==3.8.3
+seaborn==0.13.2
+tqdm==4.66.2
+wandb==0.16.4
+einops==0.7.0
+evaluate==0.4.1                    ← NEW: for BLEU/ROUGE scoring
+bert-score==0.3.13                 ← NEW: for BERTScore generation eval
+bitsandbytes==0.42.0               ← NEW: for LLaMA quantization
+accelerate==0.27.0                 ← NEW: for large model handling
+```
+
+---
+
+## Day 1 — Base Configuration
+
+`configs/base.yaml` — single source of truth.
+
+```yaml
+model:
+  backbone: "bge_large"            # distilbert | bge_large | llama
+  n_steps: 8
+  proj_dim: 256
+  n_heads: 4
+  ffn_dim: 512
+  dropout: 0.1
+  shared_weights: false
+
+training:
+  stage: 1                         # 1=JEPA | 2=decoder | 3=joint
+  max_steps: 100000
+  batch_size: 64
+  lr: 1.0e-4
+  warmup_steps: 2000
+  grad_clip: 1.0
+  ema_momentum_start: 0.990
+  ema_momentum_end: 0.9999
+  log_every: 100
+  ckpt_every: 5000
+  ckpt_dir: "checkpoints/stage1"
+
+decoder:
+  n_layers: 3
+  n_heads: 4
+  max_gen_len: 64
+  tie_embeddings: true
+
+eval:
+  k_values: [0, 1, 2, 4, 8, 16]
+  recall_at: [1, 5, 10]
+  n_probe_samples: 2000
+  tsne_perplexity: 30
+
+data:
+  max_q_len: 128
+  max_a_len: 64
+  synthetic_ratio: 0.6             # 60% synthetic, 40% public datasets
+```
+
+---
+
+## Day 2–3 — Core Math (Do Not Skip)
+
+### Concept 1: Why BGE-Large is Better Than DistilBERT
+
+DistilBERT was trained with Masked Language Modeling — predict missing words.  
+BGE-Large was trained specifically to produce meaningful sentence embeddings — similar sentences produce similar vectors.
+
+Your ThoughtModule cross-attends over these vectors. Richer input = more to reason over.
+
+**Action:** In a notebook, encode the same sentence with both models. Compute cosine similarity between semantically related sentences. BGE-Large should score 0.85+. DistilBERT will score 0.5–0.6. This is your justification for the backbone choice in the paper.
+
+### Concept 2: Why Three Training Stages Work
+
+If you train everything end-to-end from scratch, the decoder learns to shortcut — it bypasses the ThoughtModule and maps encoder output directly to text. The thinking never develops.
+
+```
+Stage 1: Force ThoughtModule to compress answer meaning into hₖ
+         (MSE loss — hₖ must predict the answer embedding)
+         ThoughtModule learns to think.
+
+Stage 2: Freeze ThoughtModule, teach decoder to read hₖ
+         (cross-entropy loss on generated tokens)
+         Decoder learns hₖ contains the answer.
+
+Stage 3: Unfreeze jointly, fine-tune together
+         (combined MSE + cross-entropy loss)
+         System refines end-to-end.
+```
+
+**Action:** Draw this on paper. Understand which parameters are frozen at each stage. This diagram goes in your paper.
+
+### Concept 3: Why Synthetic Data Helps
+
+Your ThoughtModule only learns to reason over patterns it sees during training.  
+5 public datasets = ~144K examples = limited reasoning variety.  
+250GB of synthesized multi-hop QA = millions of diverse reasoning patterns.
+
+The key insight: **multi-hop questions require K > 1 steps.**  
+Single-hop questions plateau at K=1.  
+If your training data is mostly single-hop, K-scaling won't show improvement.  
+Synthetic data lets you control this ratio.
+
+---
+
+## Day 4 — 50-Line Prototype
+
+Build end-to-end in one notebook cell using BGE-Large:
+
+1. Load `BAAI/bge-large-en-v1.5`, freeze all parameters
+2. Encode a question → full token sequence projected to 256-dim
+3. Encode an answer → mean-pooled vector projected to 256-dim
+4. Build minimal ThoughtBlock (self-attn + cross-attn + FFN)
+5. Initialize h0, loop K=4 steps
+6. Project hₖ through predictor → MSE against answer embedding
+7. Build minimal 2-layer decoder, generate 3 tokens from hₖ
+8. Compute cross-entropy on generated tokens
+9. Combined loss = MSE + CrossEntropy, call backward()
+
+**Success criterion:** Finite loss. Gradients flow through both losses. No NaN.
 
 ---
 
 # Phase 2 — Core Architecture
-> **Days 4–8 · Goal: All 4 model files built, shape-verified, ready to train**
+> **Days 5–10 · Goal: All model files built, shape-verified, decoder working**
 
 ---
 
-## Day 4 — encoder.py
+## Day 5 — backbones/
 
-### What This File Does
-`FrozenEncoder` wraps DistilBERT with two projection heads — one for question context
-(student input) and one for answer embeddings (teacher target).
+### Why a Backbones Folder
 
-### Why Freeze the Backbone
-DistilBERT already understands language from pre-training on billions of tokens.
-Unfreezing wastes compute and risks catastrophic forgetting. Only the two small
-projection heads are trainable.
+Your encoder.py should not care which backbone it uses. The backbone folder abstracts this away. Changing from BGE-Large to LLaMA should be one config line, not a code rewrite.
 
-### Two Outputs, Two Purposes
-`encode_question` returns the **full token sequence** projected to 256 dims —
-shape `(B, seq_len, 256)`. The full sequence is needed so the thought can attend
-to individual question words.
+### backbones/bge_large.py
 
-`encode_answer` returns a **single mean-pooled vector** projected to 256 dims —
-shape `(B, 256)`. One compact vector representing what the answer means.
-This is the teacher's regression target.
+```
+What it does:
+  Loads BAAI/bge-large-en-v1.5
+  Freezes all parameters
+  Returns full token sequence: (B, seq_len, 1024)
+  Returns mean-pooled vector: (B, 1024)
+  Handles attention mask correctly in pooling
 
-### What to Implement
-- Load DistilBERT, freeze all parameters with `requires_grad = False`
-- `question_proj`: `Linear(768, 256)` followed by `LayerNorm(256)`
-- `answer_proj`: `Linear(768, 256)` followed by `LayerNorm(256)`
-- Decorate the BERT forward with `@torch.no_grad()` — no gradients into backbone
-- Mean pooling must correctly ignore padding tokens using the attention mask
-- `encode_question` returns full projected sequence
-- `encode_answer` returns pooled projected vector
+Output dimension: 1024
+```
+
+### backbones/distilbert.py
+
+```
+What it does:
+  Same interface as bge_large.py
+  Loads distilbert-base-uncased
+  Returns full token sequence: (B, seq_len, 768)
+  Returns mean-pooled vector: (B, 768)
+
+Output dimension: 768
+```
+
+### backbones/llama_encoder.py
+
+```
+What it does:
+  Loads meta-llama/Llama-3-8B in 4-bit quantization
+  Uses last hidden state as sequence representation
+  Returns full token sequence: (B, seq_len, 4096)
+  Returns mean-pooled vector: (B, 4096)
+
+Output dimension: 4096
+Note: Requires A100 or H100 without quantization
+      Use bitsandbytes 4-bit for L4 compatibility
+```
+
+### encoder.py — Now Backbone-Agnostic
+
+```python
+class FrozenEncoder(nn.Module):
+    def __init__(self, cfg):
+        backbone_name = cfg.model.backbone
+        # loads correct backbone from backbones/ folder
+        # question_proj: Linear(backbone_dim, proj_dim) + LayerNorm
+        # answer_proj:   Linear(backbone_dim, proj_dim) + LayerNorm
+    
+    def encode_question(self, ids, mask):
+        # returns (B, seq_len, proj_dim)
+    
+    def encode_answer(self, ids, mask):
+        # returns (B, proj_dim)
+```
+
+Changing backbone = one line in config. Zero code changes.
 
 ---
 
-## Day 5 — thought_block.py
+## Day 6 — thought_block.py (Unchanged from v1)
 
-### What This File Does
-`ThoughtBlock` is one reasoning step. Takes thought `h` and question context `ctx`,
-returns refined thought `h`. The fundamental unit of latent reasoning.
+Same architecture. Pre-LayerNorm. Three sub-layers with residuals.
 
-### Architecture: Pre-LayerNorm
-Apply LayerNorm *before* each sub-layer, not after. Modern standard (GPT-3, PaLM).
-Gradients flow more cleanly through residual connections.
+```
+h: (B, 1, dim) → Self-Attention → Cross-Attention(ctx) → FFN → h: (B, 1, dim)
+```
 
-Three sub-layers, each with residual connection `h = h + sublayer_output`:
-
-1. **Self-Attention:** Normalize h → self-attention (Q=K=V=h) → add back.
-   Thought refines its own internal representation.
-
-2. **Cross-Attention:** Normalize h and ctx → cross-attention (Q=h, K=V=ctx) → add back.
-   Thought reads and absorbs information from the question.
-
-3. **FFN:** Normalize h → MLP (Linear → GELU → Dropout → Linear → Dropout) → add back.
-   Mixes and transforms information across the dimension axis.
-
-### What to Implement
-- Three separate `LayerNorm` layers, one per sub-layer
-- `MultiheadAttention` for self-attention with `batch_first=True`
-- `MultiheadAttention` for cross-attention with `batch_first=True`
-- FFN: `Linear(dim, ffn_dim)` → `GELU()` → `Dropout` → `Linear(ffn_dim, dim)` → `Dropout`
-- Input shapes: `h: (B, 1, dim)`, `ctx: (B, seq_len, dim)`, output `h: (B, 1, dim)`
-- Use GELU not ReLU — smoother, better for transformers
+Nothing changes here. The ThoughtBlock doesn't know or care about the backbone.
 
 ---
 
-## Day 6 — thought_module.py
+## Day 7 — thought_module.py (Minor Addition from v1)
 
-### What This File Does
-`ThoughtModule` chains K ThoughtBlocks together. Starts from learnable `h0`,
-recurrently applies each block, passing `hₖ` as input to the next step.
+Same K-step recurrent chain. Add one thing:
 
-### The Learnable h0
-`nn.Parameter` of shape `(1, 1, dim)`, initialized with scale 0.02.
-The model's "blank slate" prior before reasoning. Learned by backpropagation.
-At runtime: `h0.expand(B, -1, -1)` to match batch size.
+**Intermediate state capture** — store h after every step, not just the final one.
+
+```python
+def forward(self, ctx, n_steps=None, return_all_states=False):
+    h = self.h0.expand(B, -1, -1)
+    states = [h]                    # h0 = step 0
+    
+    for k in range(K):
+        block = self.blocks[k % len(self.blocks)]
+        h = block(h, ctx)
+        states.append(h)            # h1, h2, ..., hK
+    
+    if return_all_states:
+        return torch.stack(states, dim=1)  # (B, K+1, dim)
+    return h                               # (B, 1, dim)
+```
+
+This feeds the probing and t-SNE experiments in Phase 6.
+
+---
+
+## Day 8 — decoder.py (New File)
+
+### What the Decoder Does
+
+Takes hₖ (B, 1, 256) and generates answer text token by token.
+
+### Architecture: Cross-Attention Decoder
+
+```
+Input:     hₖ (B, 1, 256) — the thought
+           token_ids so far (for teacher forcing during training)
+
+Per layer:
+  Self-Attention on generated tokens so far (causal mask)
+  Cross-Attention: Q=token_embeddings, K=V=hₖ
+  FFN
+
+Output:    Linear(dim, vocab_size) → logits over vocabulary
+```
 
 ### Two Modes
-**`shared_weights=False`** (default): K separate blocks. Each step specializes.
-More expressive, more parameters. Recommended default.
 
-**`shared_weights=True`**: One block applied K times. Universal Transformer variant.
-Fewer parameters. Run as an ablation experiment.
+**Training mode (teacher forcing):**
+```
+Input:  hₖ + full answer token sequence
+Output: logits for each position
+Loss:   CrossEntropy(logits, shifted_answer_tokens)
+```
 
-### Inference-Time K Override
-`forward` accepts optional `n_steps` argument that overrides trained K.
-Blocks reused cyclically via modulo when `n_steps > len(self.blocks)`.
-This is what enables K=16 evaluation on a K=8 checkpoint with zero retraining.
+**Inference mode (autoregressive):**
+```
+Input:  hₖ + [BOS] token
+Loop:   Generate one token → append → repeat until [EOS] or max_len
+Output: Full generated sequence as text
+```
 
-### Return All States
-When `return_all_states=True`, store h after every step.
-Return stacked tensor `(B, K+1, dim)` — K+1 because h0 is step 0.
-Required for probing and t-SNE experiments in Phase 5.
+### Key Implementation Details
 
----
-
-## Day 7 — lc_thought.py
-
-### What This File Does
-`LCThought` is the complete model — student-teacher system fully assembled.
-
-### Student Path
-1. Encode question → context sequence `(B, seq_len, 256)`
-2. Run ThoughtModule K steps → final thought `(B, 1, 256)`
-3. Squeeze → predictor MLP → prediction `(B, 256)`
-
-### Teacher Path
-1. Encode answer → pooled vector `(B, 256)`
-2. Wrapped in `torch.no_grad()`
-3. This is the regression target
-
-### The Predictor MLP
-`Linear(256, 512)` → `GELU()` → `LayerNorm(512)` → `Linear(512, 256)`
-The bottleneck prevents shortcuts — the model can't bypass reasoning and just
-copy encoder output directly.
-
-### The Loss
-`mse_loss(pred, target.detach())` — `.detach()` is critical. Gradients must
-never flow backward into the teacher.
-
-### EMA Update Method
-Implement as `update_ema(momentum)` decorated with `@torch.no_grad()`.
-Iterate over student/teacher parameter pairs and apply EMA formula.
-Called from training loop after every optimizer step.
-
-### Teacher Initialization
-`copy.deepcopy()` both `thought_module` and `predictor`.
-Then set `requires_grad = False` on all teacher parameters.
+- Share embedding weights between input embeddings and output projection (tie_embeddings: true in config) — reduces parameters, improves coherence
+- Use causal attention mask in self-attention — token at position i cannot see position i+1
+- Cross-attention over hₖ: K and V come from hₖ, Q comes from token embeddings — decoder always reads the thought
+- Vocabulary: use same tokenizer as backbone encoder — consistent token space
 
 ---
 
-## Day 8 — Shape Verification
-Verify the full forward pass with a hardcoded 2-sample fake batch before touching data.
+## Day 9 — lc_thought.py (Extended from v1)
 
-Checks to pass:
-- `out['loss']` is a finite scalar (not NaN, not Inf)
-- `out['pred']` shape is `(2, 256)`
-- `out['target']` shape is `(2, 256)`
-- `out['all_states']` shape is `(2, 9, 256)` when `return_all_states=True`, K=8 (K+1 steps)
-- `model.update_ema(0.996)` runs without error
-- `n_steps=16` on a K=8 model runs without error
+### What Changes
 
-All checks pass → Phase 2 complete.
+Add decoder as optional component. Support three forward modes matching three training stages.
 
----
+```python
+class LCThought(nn.Module):
+    def forward(self, q_ids, q_mask, a_ids, a_mask,
+                n_steps=None,
+                return_all_states=False,
+                mode='stage1'):
+        
+        if mode == 'stage1':
+            # JEPA MSE training
+            # Returns: loss, pred, target
+        
+        elif mode == 'stage2':
+            # Decoder training (ThoughtModule frozen externally)
+            # Returns: loss (cross-entropy only), generated_logits
+        
+        elif mode == 'stage3':
+            # Joint training
+            # Returns: combined loss, pred, target, generated_logits
+        
+        elif mode == 'generate':
+            # Inference — autoregressive generation
+            # Returns: generated token ids
+```
 
-# Phase 3 — Data Pipeline
-> **Days 9–11 · Goal: Streaming interleaved loader for all 5 datasets, verified and working**
+### generate() Method
 
----
+```python
+@torch.no_grad()
+def generate(self, q_ids, q_mask, n_steps=None, max_len=64):
+    # Encode question
+    # Run ThoughtModule
+    # Autoregressively decode from hₖ
+    # Return decoded text string
+```
 
-## Day 9–10 — qa_datasets.py
-
-### The 5 Datasets
-
-| Dataset | HF Name | Task | Size | Weight |
-|---|---|---|---|---|
-| HotpotQA | `hotpot_qa` | Multi-hop factual | 113K | 35% |
-| GSM8K | `gsm8k` | Grade-school math | 8.5K | 20% |
-| CommonsenseQA | `commonsense_qa` | Commonsense MC | 12K | 20% |
-| ARC-Challenge | `ai2_arc` | Science exam | 7.8K | 15% |
-| StrategyQA | `allenai/strategy_qa` | Yes/no multi-hop | 2.8K | 10% |
-
-Different tasks force the model to learn generalizable latent reasoning, not a narrow skill.
-
-### Why Streaming
-Use `streaming=True` in `load_dataset()`. Data fetched on-demand — no bulk downloads,
-no storage requirements, no waiting before training starts.
-
-### The Normalization Problem
-Each dataset stores answers differently. Write a custom extractor for each, normalizing
-output to `{"question": str, "answer": str, "category": str}`.
-
-Key edge cases:
-- GSM8K: answers end with `"#### 120"` — split on `####`, take right side, strip whitespace
-- CommonsenseQA + ARC: multiple choice — use `answerKey` to index into choices list
-- ARC: sometimes numeric keys ("1","2") instead of letter keys ("A","B") — handle both
-- StrategyQA: boolean answers — convert `True/False` → `"yes"/"no"`
-
-### Interleaving Strategy
-Use `random.choices()` with dataset weights to randomly select which dataset to sample from.
-When an iterator is exhausted, reset it and continue.
-This maintains correct distribution throughout training.
-
-### The DataLoader
-`DataLoader` with `batch_size=64`, `num_workers=2`, `pin_memory=True`.
-Use `padding="max_length"` and `truncation=True` for consistent batch shapes.
-Each item yields: `q_ids`, `q_mask`, `a_ids`, `a_mask`, `category`.
+This is the method that powers the K-scaling generation demo.
 
 ---
 
-## Day 11 — Verify the Pipeline
+## Day 10 — Shape Verification + Tests
 
-Pull a batch and check:
-- Decode `q_ids` → looks like a real question
-- Decode `a_ids` → looks like the matching answer
-- `category` field matches correct dataset source
-- `q_ids` shape is `(batch_size, 128)`, `a_ids` is `(batch_size, 64)`
-- Sample 10+ batches — all 5 categories appear, roughly matching weights
+### tests/test_thought_module.py
 
-Print 3 decoded examples from different categories before spending 6 hours training.
+```
+Check: output shape (B, 1, dim) with K=8
+Check: n_steps=16 override on K=8 model works
+Check: return_all_states gives (B, K+1, dim)
+Check: h0 gradient is not None after backward
+```
+
+### tests/test_decoder.py
+
+```
+Check: training mode logits shape (B, seq_len, vocab_size)
+Check: generate() returns a non-empty string
+Check: generate() with K=1 and K=8 both work
+Check: cross-attention receives hₖ correctly
+```
+
+### tests/test_ema.py
+
+```
+Check: teacher parameters change after update_ema()
+Check: teacher parameters change LESS with higher momentum
+Check: teacher requires_grad is False throughout
+Check: update_ema() with @no_grad doesn't affect computational graph
+```
+
+Run all tests before touching data.
 
 ---
 
-# Phase 4 — Training System
-> **Days 12–16 · Goal: Full loop with EMA scheduling, mixed precision, logging, checkpointing**
+# Phase 3 — Backbone Upgrade Verification
+> **Days 11–14 · Goal: BGE-Large working end-to-end, baseline numbers established**
 
 ---
 
-## Day 12–14 — trainer.py
+## Day 11 — BGE-Large Integration
 
-### Learning Rate: Cosine with Linear Warmup
-Linear warmup for first 2000 steps (0 → target LR).
-Then cosine decay: `lr × 0.5 × (1 + cos(π × progress))` where progress ∈ [0, 1].
-Update by modifying `optimizer.param_groups` at the start of every step.
+Switch to BGE-Large. Run the full forward pass.  
+Everything in encoder.py should work without changes — only the backbone changes.
 
-### EMA Momentum Schedule
-Cosine increase from 0.990 → 0.9999 over full training.
-Formula: `end - (end - start) × (cos(π × progress) + 1) / 2`
+**Verify:**
+- `encode_question` returns (B, seq_len, 256) — projection from 1024 works
+- `encode_answer` returns (B, 256) — pooling from 1024 works
+- Loss is finite and lower than DistilBERT baseline (it should be)
+- Training step time is acceptable (BGE-Large is heavier — benchmark this)
 
-- Step 0: momentum ≈ 0.990 — teacher updates quickly when student is changing fast
-- Step 100k: momentum ≈ 0.9999 — teacher nearly frozen, providing stable fine-grained targets
+---
 
-### Optimizer
-`AdamW` with `weight_decay=0.04`, `betas=(0.9, 0.95)`.
-Applied only to student parameters — explicitly list them.
-Include: `thought_module`, `predictor`, `encoder.question_proj`, `encoder.answer_proj`.
-Never include teacher parameters or frozen DistilBERT.
+## Day 12 — notebooks/03_backbone_comparison.ipynb
 
-### Mixed Precision (BF16)
-Wrap forward pass in `torch.cuda.amp.autocast(dtype=torch.bfloat16)`.
-Use `GradScaler` for backward pass.
-Halves memory, significantly speeds up training on GCP L4 and A100.
-On older GPUs: switch to FP16 but watch for NaN gradients more carefully.
+This notebook produces a figure for your paper.
 
-### Gradient Clipping
-`clip_grad_norm_(student_params, max_norm=1.0)` before every optimizer step.
-Unscale gradients first when using GradScaler.
-Prevents exploding gradients common early in transformer training.
+**Experiment:**
+1. Encode 500 question-answer pairs with DistilBERT
+2. Encode the same 500 pairs with BGE-Large
+3. Compute cosine similarity between question and its correct answer for both
+4. Plot distribution — BGE-Large should show higher similarity = richer signal
+5. Run K=4 ThoughtModule on both, compute Recall@1
+6. Table: DistilBERT Recall@1 vs BGE-Large Recall@1
 
-### WandB Logging
-Log every 100 steps: `loss`, `lr`, `ema_momentum`.
-These three curves diagnose all common training failures.
+**Expected result:** BGE-Large Recall@1 is meaningfully higher. This justifies backbone choice in the paper.
 
-### Checkpointing
-Save every 5000 steps: `step`, `model_state_dict`, `optimizer_state_dict`, `cfg`.
-Include optimizer state to allow training resumption.
-Save final as `final.pt`.
+---
 
-### Per-Step Order of Operations
-1. Get batch → move to GPU
-2. Update LR in optimizer param groups
-3. Forward pass under autocast
+## Day 13–14 — Ablation Configs
+
+Create configs for all planned ablations. Write them now so you don't forget later.
+
+`configs/ablations/shared_weights.yaml` — shared vs separate blocks  
+`configs/ablations/dim_256.yaml` — 256-dim latent space  
+`configs/ablations/dim_512.yaml` — 512-dim latent space  
+`configs/ablations/k_steps.yaml` — train with K=4 vs K=8 vs K=16  
+
+Each ablation is runnable as:
+```bash
+python main.py --config configs/ablations/dim_512.yaml
+```
+
+Zero code changes between ablations. All results traceable to exact config.
+
+---
+
+# Phase 4 — Data Pipeline + Synthetic Generation
+> **Days 15–20 · Goal: Streaming loader working, synthetic QA pipeline producing multi-hop pairs**
+
+---
+
+## Day 15 — qa_datasets.py (Same as v1 + One Addition)
+
+Five public datasets, streaming, interleaved. Same implementation as v1.
+
+**Addition:** Add `difficulty_score` field to each sample.
+
+```python
+def difficulty_score(question: str) -> int:
+    """
+    0 = single-hop (answerable in one lookup)
+    1 = two-hop (requires connecting two facts)
+    2 = multi-hop (3+ connections required)
+    
+    Heuristic: count question words that imply connection
+    ('which', 'that also', 'where did', 'who later')
+    """
+```
+
+This lets the difficulty_filter.py later remove easy samples that don't benefit from K > 1 thinking.
+
+---
+
+## Day 16–17 — datasets/synthetic/generator.py
+
+### The Synthesis Goal
+
+Convert raw text passages (from your 250GB corpus) into multi-hop QA pairs.
+
+### How It Works
+
+```
+Input:   Raw text paragraph from corpus
+         Example: "Marie Curie was born in Warsaw in 1867.
+                   She later moved to Paris where she conducted
+                   research that led to the discovery of polonium."
+
+Prompt to LLM API:
+         "Generate 2 multi-hop questions from this paragraph.
+          Each question must require connecting at least 2 facts
+          to answer. Output as JSON:
+          [{'question': str, 'answer': str, 'hops': int}]
+          Only output JSON, no other text."
+
+Output:  [
+           {
+             'question': 'In which city did the scientist born in 
+                          Warsaw discover a new element?',
+             'answer': 'Paris',
+             'hops': 2
+           }
+         ]
+```
+
+### API Options (in order of quality)
+
+1. Claude API (`claude-sonnet-4-6`) — best quality, costs money
+2. GPT-4o-mini — good quality, cheap
+3. Local Mistral-7B — free, slower, slightly lower quality
+
+For 250GB corpus, local Mistral-7B is the practical choice. Claude API for quality verification of a smaller sample.
+
+### Implementation Details
+
+- Batch paragraphs in groups of 10 — one API call per batch
+- Async requests — run 8 parallel generation jobs
+- Save to JSONL format — appendable, resumable if interrupted
+- Target: 5–10 million QA pairs total from 250GB
+- Estimated time: 3–5 days running continuously on a single GPU
+
+---
+
+## Day 18 — datasets/synthetic/filter.py
+
+Not all generated pairs are good. Filter aggressively.
+
+### Filter Rules
+
+```
+Remove if:
+  answer is empty or whitespace
+  question length < 20 characters (too simple)
+  answer is exactly in the question (not a real question)
+  hops < 2 (single-hop, defeats the purpose)
+  question doesn't end with '?' 
+  answer length > 100 characters (likely malformed)
+  duplicate questions (exact match dedup)
+  near-duplicate questions (cosine similarity > 0.95)
+
+Keep if:
+  hops >= 2
+  answer is a specific entity, number, or short phrase
+  question contains connecting language
+  ('which', 'where did', 'who later', 'what resulted')
+```
+
+Target retention rate: ~60–70%. If below 50%, the generator prompt needs adjustment.
+
+---
+
+## Day 19 — datasets/preprocessing/difficulty_filter.py
+
+Before training, filter the combined dataset so:
+- At least 70% of samples have difficulty_score >= 1
+- At least 40% have difficulty_score == 2
+
+Single-hop questions don't teach the model to use multiple thinking steps. They're not harmful but they dilute the training signal that drives K-scaling.
+
+---
+
+## Day 20 — Pipeline Verification
+
+### notebooks/02_data_exploration.ipynb
+
+Before training on synthetic data:
+
+1. Decode 20 synthetic QA pairs — do they look like real multi-hop questions?
+2. Plot difficulty score distribution — is it multi-hop heavy?
+3. Plot answer length distribution — any outliers?
+4. Verify category distribution matches config weights
+5. Compute vocabulary overlap between synthetic and public datasets
+6. Sample 5 pairs from each dataset type and print them
+
+**Rule:** If you can't tell good samples from bad by reading 20 examples, the filter is not working. Fix the filter before training.
+
+---
+
+# Phase 5 — Three-Stage Training
+> **Days 21–28 · Goal: All three stages complete, K-scaling working, decoder generating text**
+
+---
+
+## Stage 1 — JEPA Training (Days 21–24)
+
+### training/trainer.py (Same as v1 + schedulers.py split)
+
+Move LR schedule and EMA schedule to `training/schedulers.py`:
+
+```python
+def get_lr(step, cfg):
+    if step < cfg.training.warmup_steps:
+        return cfg.training.lr * step / cfg.training.warmup_steps
+    progress = (step - cfg.training.warmup_steps) / (cfg.training.max_steps - cfg.training.warmup_steps)
+    return cfg.training.lr * 0.5 * (1 + math.cos(math.pi * progress))
+
+def get_ema_momentum(step, cfg):
+    progress = step / cfg.training.max_steps
+    start = cfg.training.ema_momentum_start
+    end = cfg.training.ema_momentum_end
+    return end - (end - start) * (math.cos(math.pi * progress) + 1) / 2
+```
+
+### Per-Step Order (Same as v1)
+
+1. Batch → GPU
+2. Update LR
+3. Forward under BF16 autocast
 4. Zero gradients
-5. Backward via scaled loss
+5. Scaled backward
 6. Unscale gradients
 7. Clip gradients
 8. Optimizer step
 9. Scaler update
 10. EMA teacher update
-11. Log to WandB (every 100)
-12. Save checkpoint (every 5000)
+11. Log (every 100)
+12. Checkpoint (every 5000)
+
+### What to Watch in WandB
+
+- `loss` — should decrease steadily for first 20K steps, then slower
+- `lr` — warmup then cosine curve
+- `ema_momentum` — 0.990 → 0.9999 curve
+- If loss stops decreasing before step 10K: lower LR or check EMA momentum
+
+### Success Criterion
+
+After 100K steps: Recall@1 > 30% on held-out test set.  
+If below 20%: check encoder projections are training (not accidentally frozen).
 
 ---
 
-## Day 15–16 — main.py and run.sh
+## Stage 2 — Decoder Training (Days 25–26)
 
-### main.py (~10 lines)
-Load YAML config → instantiate model → instantiate dataloader using
-`model.encoder.tokenizer` → call `train(model, loader, cfg)`.
-No training logic lives here.
+### training/decoder_trainer.py
 
-### run.sh
-Set `set -e` at top for immediate failure on errors.
-Install requirements quietly → `nvidia-smi` to verify GPU → run
-`python main.py 2>&1 | tee training_log.txt`.
+**Freeze ThoughtModule completely.** Only decoder parameters train.
+
+```python
+# Freeze everything except decoder
+for param in model.encoder.parameters():
+    param.requires_grad = False
+for param in model.thought_module.parameters():
+    param.requires_grad = False
+for param in model.predictor.parameters():
+    param.requires_grad = False
+
+# Only decoder trains
+optimizer = AdamW(model.decoder.parameters(), lr=5e-4)
+```
+
+**Loss:** CrossEntropy on teacher-forced answer tokens.
+
+**Duration:** ~20–30K steps. This is much faster than Stage 1.
+
+### What to Watch
+
+- `decoder_loss` — should decrease clearly within 5K steps
+- If loss is stuck: verify hₖ is being passed to decoder correctly
+- If loss goes NaN: lower LR, check embedding weights
+
+### Success Criterion
+
+At 20K steps, run `model.generate()` on 20 test questions.  
+If at least 30% produce the correct answer (exact or near match): Stage 2 working.  
+If below 20%: the thought vectors from Stage 1 may not contain enough answer information.
 
 ---
 
-# Phase 5 — Evaluation & Experiments
-> **Days 17–22 · Goal: 4 experiments proving the model reasons — your research contribution**
+## Stage 3 — Joint Fine-tuning (Days 27–28)
+
+### training/finetune_trainer.py
+
+Unfreeze ThoughtModule. Train everything together.
+
+```python
+# Combined loss
+mse_weight = 0.5
+ce_weight = 0.5
+loss = mse_weight * mse_loss + ce_weight * decoder_loss
+```
+
+**Important:** Use a lower LR than Stage 1 (1e-5, not 1e-4). Fine-tuning, not training from scratch.
+
+**Duration:** ~20K steps. Just enough to let the components align.
+
+### What to Watch
+
+- Both `mse_loss` and `decoder_loss` should decrease
+- If `mse_loss` spikes up: `mse_weight` is too high, reduce to 0.3
+- If `decoder_loss` spikes: ThoughtModule drifted, reduce `ce_weight`
 
 ---
 
-## Experiment 1 — K-Scaling (Most Important)
+## scripts/ — Entry Points
+
+### train_stage1.sh
+```bash
+set -e
+nvidia-smi
+python main.py --config configs/bge_large.yaml \
+               --stage 1 \
+               2>&1 | tee results/stage1_log.txt
+```
+
+### train_stage2.sh
+```bash
+set -e
+python train_decoder.py --config configs/decoder.yaml \
+                         --ckpt checkpoints/stage1/final.pt \
+                         2>&1 | tee results/stage2_log.txt
+```
+
+### train_stage3.sh
+```bash
+set -e
+python finetune.py --config configs/bge_large.yaml \
+                   --stage1_ckpt checkpoints/stage1/final.pt \
+                   --stage2_ckpt checkpoints/stage2/final.pt \
+                   2>&1 | tee results/stage3_log.txt
+```
+
+---
+
+# Phase 6 — Evaluation + Experiments
+> **Days 29–36 · Goal: 5 experiments, all figures generated, results honest and complete**
+
+---
+
+## Experiment 1 — K-Scaling with Generation (Most Important)
 
 ### The Claim
-Genuine reasoning → accuracy increases with more thinking steps.
-This is the central claim of the paper.
+
+More thinking steps → better generated answers. Same checkpoint. No retraining.
 
 ### Setup
-Load a single checkpoint. No retraining. Evaluate at K = 0, 1, 2, 4, 8, 16.
-Compute Recall@1 and Recall@5 on a held-out test set for each K.
 
-### Recall@K Explained
-Pool of candidate answer embeddings (one per test question).
-Model produces a predicted answer vector.
-Recall@1 = correct answer is nearest neighbor to prediction.
-Recall@5 = correct answer is in top 5 nearest neighbors.
+Load Stage 3 checkpoint. For K = 0, 1, 2, 4, 8, 16:
+- Run `model.generate()` on 500 test questions
+- Compute Recall@1 (embedding retrieval)
+- Compute exact match accuracy
+- Compute BLEU-4 against reference answers
+- Compute BERTScore F1
 
 ### K=0 Baseline
-No reasoning — predictor receives only untransformed h0.
-Should perform worst by a clear margin.
+
+Predictor receives raw h0 (no thinking). Should clearly underperform.  
+If K=0 is close to K=8: ThoughtModule isn't contributing — debug Stage 1.
 
 ### Expected Result Table
 
-| K Steps | Recall@1 | Recall@5 |
-|:---:|:---:|:---:|
-| K = 0 | — | — |
-| K = 1 | — | — |
-| K = 2 | — | — |
-| K = 4 | — | — |
-| K = 8 | — | — |
-| K = 16 | — | — |
+| K Steps | Recall@1 | Exact Match | BLEU-4 | BERTScore |
+|:---:|:---:|:---:|:---:|:---:|
+| K = 0 | — | — | — | — |
+| K = 1 | — | — | — | — |
+| K = 2 | — | — | — | — |
+| K = 4 | — | — | — | — |
+| K = 8 | — | — | — | — |
+| K = 16 | — | — | — | — |
 
-Monotonically increasing curve = genuine latent reasoning confirmed.
+Monotonically increasing across all four metrics = strong evidence of genuine latent reasoning.
+
+### The Demo Output
+
+Also save actual generated text at each K for 10 representative questions.  
+This table goes in the README and gets attention.
 
 ---
 
 ## Experiment 2 — Linear Probing
 
 ### The Claim
-Thought vectors spontaneously encode semantically meaningful information —
-without any supervision on category labels during training.
+
+Thought vectors spontaneously encode meaningful semantic information — without any category supervision.
 
 ### Setup
-At each step hₖ (0 to K), train `LogisticRegression` from sklearn to predict
-question category (math / factual_multihop / commonsense / science / strategy)
-from the thought vector alone.
 
-Also probe for answer type (numeric / yes-no / entity) as secondary experiment.
-
-### How to Interpret
-Chance accuracy at step 0, increasing through step K =
-model spontaneously encodes category-relevant information during reasoning.
+At each step hₖ (0 to K), collect thought vectors for 2000 test questions.  
+Train `LogisticRegression` (sklearn) to predict:
+- Question category (math / factual / commonsense / science / strategy)
+- Answer type (numeric / yes-no / entity / phrase)
 
 ### What to Plot
-Line chart: step (x-axis) vs probe accuracy (y-axis). Rising then plateauing curve.
+
+Line chart: Step (x-axis) vs Probe Accuracy (y-axis).  
+Two lines: one per label type.  
+Expected shape: starts near chance (20% for 5 classes), rises through K, plateaus.
 
 ---
 
-## Experiment 3 — MSE Curve per Step
+## Experiment 3 — MSE Curve Per Step
 
 ### The Claim
-Each reasoning step brings the prediction closer to the correct answer embedding.
+
+Each reasoning step brings the prediction closer to the correct answer.
 
 ### Setup
-For each step k from 1 to K: extract intermediate thought at step k, pass through
-predictor, compute MSE against teacher target. Plot as curve.
 
-### Expected Pattern
-Decreasing curve: high MSE at step 1, progressively lower through K, diminishing returns
-near K. Flat or increasing curve = debug gradient flow and EMA update.
+For each step k from 1 to K:
+- Extract hₖ from `return_all_states`
+- Pass through predictor
+- Compute MSE against teacher target
+
+Plot: Step (x-axis) vs MSE (y-axis). Decreasing curve.
+
+If curve is flat: ThoughtModule learned a trivial fixed-point — debug h0 initialization.  
+If curve increases after K=4: possible overfitting to K=8, try shared_weights ablation.
 
 ---
 
 ## Experiment 4 — t-SNE Thought Trajectories
 
 ### The Claim
-Different question categories cause different reasoning paths through latent space.
+
+Different question categories take different paths through latent space.
 
 ### Setup
-Collect all intermediate states h0...hK for test questions across all 5 categories.
-Flatten to `(N × (K+1), 256)`. Run t-SNE to project to 2D.
-Reshape back to trajectories `(N, K+1, 2)`.
-Plot arrows from h0 to hK colored by category.
+
+1. Collect h0...hK for 500 test questions across all 5 categories
+2. Flatten to (500 × (K+1), 256)
+3. Run t-SNE (perplexity=30, n_iter=1000) → 2D points
+4. Reshape to trajectories (500, K+1, 2)
+5. Plot arrows from h0 to hK, colored by category
 
 ### What to Look For
-Distinct colored clusters. Same category → similar trajectory.
-Math questions cluster separately from commonsense questions.
-Mixed with no structure → model hasn't learned category-specific reasoning.
 
-### Visualization Tips
-- Dark matplotlib background
-- Semi-transparent arrows for overlapping visibility
-- Small dot at h0, arrowhead at hK
-- Clear legend with distinct colors
-- This is your most visually striking result for README and paper
+- Math questions cluster together
+- Yes/no strategy questions cluster separately
+- Arrows within each category point in similar directions
+- Different categories point in different directions
+
+If fully mixed with no structure: increase n_probe_samples to 2000.  
+Try perplexity 15 or 50. If still mixed: the backbone representations may need more training.
 
 ---
 
-# Phase 6 — Portfolio Polish
-> **Days 23–28 · Goal: Clean GitHub, paper draft, reproducible results**
+## Experiment 5 — Generation Quality by Category (New in v2)
+
+### The Claim
+
+The model reasons differently for different question types — and generation quality reflects this.
+
+### Setup
+
+Compute BLEU-4 and BERTScore separately for each of the 5 categories.  
+Run at K=8.
+
+### What to Look For
+
+- GSM8K (math): exact numeric answers expected — Exact Match is the metric
+- StrategyQA (yes/no): binary — Exact Match expected to be high if working
+- HotpotQA (multi-hop): entity answers — BERTScore is appropriate
+- CommonsenseQA: phrase answers — BERTScore most informative
+
+Per-category breakdown shows where the model is strong vs weak.  
+Honest reporting of weak categories is better than hiding them.
 
 ---
 
-## Day 23–25 — GitHub Repository
+## notebooks/06_paper_figures.ipynb
 
-### README Story Order
-1. The idea — open with "Most language models think out loud. This one doesn't."
-2. Architecture diagram — ASCII art showing question → ThoughtBlocks → prediction
-3. Comparison table — three-way comparison vs Quiet-STaR and Coconut
-4. Key results — filled K-scaling table, t-SNE image, MSE curve image
-5. Quickstart — install and train in under 5 lines
-6. Project structure — annotated file tree
-7. Configuration guide — key YAML settings explained
-8. Citation — BibTeX for arXiv submission
+All five experiments produce publication-ready figures here.
 
-### Reproducibility Checklist
-- Random seeds set in `main.py` — `torch.manual_seed` and `numpy.random.seed`
-- Evaluation checkpoint downloadable (HuggingFace Hub or Google Drive)
-- Config file saved inside checkpoint state dict
-- Eval scripts runnable in a single command with documented arguments
-- `requirements.txt` tested from a fresh virtual environment
-- All README result images generated from the provided checkpoint
+Settings for all plots:
+- Dark background (`plt.style.use('dark_background')`)
+- Figure size: (10, 6) for single plots, (14, 6) for side-by-side
+- Font size: 14 for labels, 12 for ticks
+- DPI: 300 for saving
+- Format: PDF for paper (lossless), PNG for README
+
+Save all figures to `paper/figures/` automatically.
 
 ---
 
-## Day 26–28 — Paper Writeup
+# Phase 7 — Paper + Portfolio Polish
+> **Days 37–42 · Goal: arXiv-ready paper, clean GitHub, reproducible codebase**
 
-### Abstract (4 sentences)
-State the problem (token-level reasoning is expensive and not always necessary).
-State your approach (K recurrent cross-attention steps in 256-dim latent space,
-trained with JEPA MSE objective).
-State the key result (accuracy improves monotonically with K using same checkpoint,
-no retraining required).
-State the significance (no RL, no CoT labels, backbone fully frozen).
+---
 
-### Section 1 — Introduction
-Motivate latent reasoning. Limitations of token-level CoT.
-End with numbered contributions list: (1) separate ThoughtModule without backbone modification,
-(2) inference-time K scaling, (3) pure Q&A training — no reasoning traces needed.
+## Day 37 — Paper Section 1 + 2 (Should Already Be Drafted)
+
+If you've been writing as you go, Sections 1 and 2 are already done.  
+If not, write them now before touching results.
+
+### Abstract (Write This Last, Outline It Now)
+
+Four sentences:
+1. Problem: token-level reasoning is expensive and exposes the reasoning process unnecessarily
+2. Approach: K recurrent cross-attention steps in 256-dim latent space, BGE-Large encoder, text decoder, trained with JEPA MSE + cross-entropy
+3. Key result: accuracy and generation quality improve monotonically with K using same checkpoint, demonstrated across 5 QA categories
+4. Significance: no RL, no CoT labels, backbone fully frozen, K adjustable at inference
 
 ### Section 2 — Related Work
-Three prior works with clear differentiation:
-- **I-JEPA** — origin of the JEPA training objective, extended here to language reasoning
-- **Coconut** — most similar, but requires backbone modification and partial token supervision
-- **Quiet-STaR** — hidden reasoning but uses REINFORCE and modifies backbone
+
+Three prior works, each in one paragraph with clear differentiation:
+
+**I-JEPA (Assran et al., 2023)** — JEPA objective for vision, extended here to language reasoning  
+**Coconut (Hao et al., 2024)** — most similar approach, requires backbone modification and partial token supervision; our model requires neither  
+**Quiet-STaR (Zeiler et al., 2024)** — hidden reasoning tokens, but uses REINFORCE and modifies backbone; we use simple MSE and leave backbone frozen
+
+---
+
+## Day 38–39 — Paper Sections 3 + 4
 
 ### Section 3 — Architecture
-Full pipeline with equations: attention formula, EMA update rule, JEPA MSE objective.
-Student-teacher diagram. Justify each design choice: pre-LN, frozen backbone,
-predictor bottleneck, cosine EMA scheduling, shared vs separate blocks.
+
+Full pipeline description with equations.
+
+Attention formula:
+```
+Attention(Q, K, V) = softmax(QKᵀ / √d) × V
+```
+
+EMA update:
+```
+θ_teacher ← m × θ_teacher + (1 - m) × θ_student
+```
+
+JEPA objective:
+```
+L_JEPA = MSE(f_pred(hₖ), sg(f_enc(answer)))
+```
+
+Decoder objective:
+```
+L_dec = CrossEntropy(f_dec(hₖ, tokens[:-1]), tokens[1:])
+```
+
+Combined Stage 3 loss:
+```
+L = α × L_JEPA + β × L_dec
+```
+
+Justify each design choice in one sentence:
+- Pre-LayerNorm: gradient stability in deep networks
+- Frozen backbone: prevent catastrophic forgetting, reduce compute
+- Predictor bottleneck: prevent shortcut learning
+- Cosine EMA schedule: fast adaptation early, stable targets late
+- BGE-Large: superior embedding quality vs MLM-trained models
 
 ### Section 4 — Experiments
-All 4 experiments with tables and figures. For each: hypothesis → setup → result → interpretation.
+
+Five experiments, each structured as: Hypothesis → Setup → Result → Interpretation.
+
+For each result: be honest about what it shows and what it doesn't.  
+If K=16 is only slightly better than K=8: say so. "Diminishing returns beyond K=8 suggest the model converges within that budget" is a good sentence, not a failure.
+
+---
+
+## Day 40 — Paper Section 5 + Full Draft
 
 ### Section 5 — Conclusion
-Summarize results. Three concrete future directions:
-1. Scaling to larger backbone (BERT-large or sentence-transformers)
-2. Extending to generation tasks beyond retrieval
-3. Testing longer chains (K > 16) and continued accuracy scaling
+
+Two paragraphs:
+
+Paragraph 1: What you showed. One sentence per experiment. Specific numbers.  
+Paragraph 2: Three concrete future directions:
+
+1. Scaling backbone — LLaMA-3-8B encoder should significantly increase reasoning capacity; preliminary experiments with 4-bit quantization showed promising results
+2. Longer chains — K > 16 not tested; continued accuracy scaling may hold, as the ThoughtModule is theoretically unbounded
+3. Generation tasks beyond QA — the decoder architecture extends naturally to summarization and explanation generation
+
+---
+
+## Day 41 — GitHub Repository
+
+### README Update
+
+Fill in all experiment result tables with your actual numbers.  
+Add the t-SNE figure and K-scaling plot directly in the README.  
+Add the generation quality table showing K=1 vs K=8 actual text outputs.
+
+### Reproducibility Checklist
+
+```
+□ Random seed set: torch.manual_seed(42) in main.py
+□ Checkpoint downloadable (HuggingFace Hub or Google Drive link)
+□ Config saved inside checkpoint state dict
+□ eval.py runnable in one command with documented args
+□ requirements.txt tested from fresh venv
+□ All README figures generated from provided checkpoint
+□ generate() demo runnable in 5 lines
+□ All three training stages documented in README
+```
+
+### Repository Hygiene
+
+- `.gitignore` covers checkpoints/, results/, __pycache__/
+- No hardcoded paths anywhere — all paths from config
+- No API keys in code — loaded from environment variables
+- LICENSE file present (MIT)
+- `README.md` has quickstart that works in under 5 minutes
+
+---
+
+## Day 42 — arXiv Submission
+
+### Before Submitting
+
+1. Run the full eval pipeline one more time from the checkpoint — verify numbers match paper
+2. Ask someone else to clone the repo and run quickstart — fix anything that breaks
+3. Check all figure captions are self-contained (readable without surrounding text)
+4. Check all table entries are filled (no "—" left in results tables)
+5. Proofread abstract three times — it's the only thing most people read
+
+### Submission
+
+- Category: cs.LG (Machine Learning) primary, cs.CL (Computation and Language) secondary
+- Title: "Think in Silence: Latent Reasoning via Recurrent Cross-Attention with Inference-Time K Scaling"
+- After submission, post on Twitter/X with the t-SNE figure and the K-scaling demo output
 
 ---
 
@@ -601,39 +1192,45 @@ Summarize results. Three concrete future directions:
 
 | Problem | Symptom | Fix |
 |---|---|---|
-| Out of Memory | CUDA OOM during training | Reduce batch_size to 32 or 16. Add gradient checkpointing. |
-| Loss not decreasing | Stuck same MSE after 10K steps | Try lr=3e-4. Lower ema_momentum_start to 0.98. |
-| Representation collapse | All predictions identical vectors | Lower ema_momentum_start to 0.98. Reduce predictor capacity. |
-| Streaming hangs | DataLoader freezes on first batch | Set num_workers=0 to debug. Check datasets version. |
-| NaN gradients | Loss suddenly NaN | Lower grad_clip to 0.5. Try FP16 instead of BF16. |
-| K=16 worse than K=8 | Accuracy degrades beyond trained K | Try shared_weights: true. Train for more steps. |
-| Probe accuracy flat | No improvement across steps | Verify return_all_states captures intermediate states correctly. |
-| t-SNE fully mixed | No visible category clusters | Increase n_probe_samples. Try perplexity 15 or 50. |
+| OOM on BGE-Large | CUDA OOM at batch 64 | Reduce to batch 32, gradient checkpointing |
+| Backbone not loading | HuggingFace download error | Set `TRANSFORMERS_OFFLINE=1`, download manually |
+| Stage 2 loss stuck | Decoder loss > 5 after 5K steps | Verify hₖ is detached correctly from Stage 1 graph |
+| Generation garbage | Random tokens, no coherent text | Check tokenizer match between encoder and decoder |
+| K=16 worse than K=8 | Accuracy degrades beyond trained K | Try shared_weights: true ablation |
+| Synthetic data low quality | Filter retaining < 50% | Adjust generator prompt, add explicit hops requirement |
+| t-SNE no clusters | All points mixed | Increase n_probe_samples, try perplexity 15 or 50 |
+| NaN in Stage 3 | Loss suddenly NaN | Reduce mse_weight and ce_weight, lower LR to 5e-6 |
+| Probe accuracy flat | No improvement across steps | Verify return_all_states detaches each state |
+| EMA collapse | All predictions identical | Lower ema_momentum_start to 0.98, reduce predictor capacity |
 
 ---
 
-# Milestones & Success Criteria
+# Milestones + Success Criteria
 
-**End of Phase 1:** Prototype runs end-to-end. Finite loss. Gradients flow.
-All three math concepts understood and verified in notebook.
+**End of Phase 1:** BGE-Large forward pass works. Finite loss with both MSE and CE. All three math concepts understood.
 
-**End of Phase 2:** All 4 files complete. Shape verification passes. EMA update works.
-K override at inference works without errors.
+**End of Phase 2:** All 6 model files complete. All tests pass. K override works. Decoder generates non-garbage text.
 
-**End of Phase 3:** Dataloader produces correct batches. All 5 categories visible.
-Decoded examples look like real QA pairs.
+**End of Phase 3:** BGE-Large vs DistilBERT comparison complete. BGE-Large shows clear improvement. Ablation configs ready.
 
-**End of Phase 4:** Training runs 1000 steps without crash. Loss decreasing in WandB.
-LR warmup curve correct. Checkpoints being saved.
+**End of Phase 4:** Synthetic pipeline running. Sample quality verified manually. Multi-hop ratio > 70% in combined dataset.
 
-**End of Phase 5:** K-scaling shows monotonically increasing accuracy. Probe accuracy
-above chance and improves across steps. MSE curve decreasing.
-t-SNE shows at least partial category separation.
+**End of Phase 5:** All three training stages complete without crash. Stage 3 final.pt checkpoint saved. K-scaling shows improvement at preliminary check.
 
-**End of Phase 6:** GitHub clean, documented, reproducible from scratch.
-Paper draft covers all 5 sections. Results honest about limitations.
+**End of Phase 6:** K-scaling monotonically increasing across all four metrics. Probe accuracy above chance and improving. t-SNE shows partial or full category separation. MSE curve decreasing. All figures saved.
+
+**End of Phase 7:** arXiv paper submitted. GitHub clean and reproducible. README has actual numbers and figures.
 
 ---
 
-*Start with Day 1. Set up the folder structure and run the sanity-check notebook.
-Return here at each phase transition.*
+## The Non-Negotiable Rule
+
+> Write one paragraph of the paper every day from Day 1.  
+> Don't wait for results. Section 1 and 2 can be written today.  
+> Students who write as they go finish papers.  
+> Students who wait until everything is done usually don't.
+
+---
+
+*Start with Day 1. Set up the folder structure. Return here at each phase transition.*  
+*The architecture is sound. The math is on your side. Finish it.*
