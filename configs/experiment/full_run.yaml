@@ -1,0 +1,39 @@
+model:
+  backbone: "bge_large"
+  n_steps: 8
+  proj_dim: 256
+  n_heads: 4
+  ffn_dim: 512
+  dropout: 0.1
+  shared_weights: false
+
+training:
+  stage: 1
+  max_steps: 200000
+  batch_size: 128
+  lr: 1.0e-4
+  warmup_steps: 4000
+  grad_clip: 1.0
+  ema_momentum_start: 0.990
+  ema_momentum_end: 0.9999
+  log_every: 100
+  ckpt_every: 10000
+  ckpt_dir: "checkpoints/full_run"
+
+decoder:
+  n_layers: 3
+  n_heads: 4
+  max_gen_len: 64
+  tie_embeddings: true
+
+eval:
+  k_values: [0, 1, 2, 4, 8, 16, 32]
+  recall_at: [1, 5, 10]
+  n_probe_samples: 5000
+  tsne_perplexity: 40
+
+data:
+  max_q_len: 128
+  max_a_len: 64
+  min_difficulty: 1
+  synthetic_ratio: 0.6

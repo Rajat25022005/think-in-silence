@@ -1,0 +1,39 @@
+model:
+  backbone: "bge_large"
+  n_steps: 16
+  proj_dim: 256
+  n_heads: 4
+  ffn_dim: 512
+  dropout: 0.1
+  shared_weights: false
+
+training:
+  stage: 1
+  max_steps: 100000
+  batch_size: 64
+  lr: 1.0e-4
+  warmup_steps: 2000
+  grad_clip: 1.0
+  ema_momentum_start: 0.990
+  ema_momentum_end: 0.9999
+  log_every: 100
+  ckpt_every: 5000
+  ckpt_dir: "checkpoints/ablation_k16"
+
+decoder:
+  n_layers: 3
+  n_heads: 4
+  max_gen_len: 64
+  tie_embeddings: true
+
+eval:
+  k_values: [0, 1, 2, 4, 8, 16]
+  recall_at: [1, 5, 10]
+  n_probe_samples: 2000
+  tsne_perplexity: 30
+
+data:
+  max_q_len: 128
+  max_a_len: 64
+  min_difficulty: 0
+  synthetic_ratio: 0.6
