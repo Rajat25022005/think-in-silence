@@ -1,5 +1,5 @@
 """
-Streaming interleaved QA dataloader for 5 public datasets.
+Streaming interleaved QA dataloader for 6 public datasets.
 """
 
 import random
@@ -13,7 +13,7 @@ DATASET_CONFIGS = [
         "name":    "hotpot_qa",
         "config":  "distractor",
         "split":   "train",
-        "weight":  0.35,
+        "weight":  0.20,
         "category": "factual_multihop"
     },
     {
@@ -27,7 +27,7 @@ DATASET_CONFIGS = [
         "name":    "commonsense_qa",
         "config":  None,
         "split":   "train",
-        "weight":  0.20,
+        "weight":  0.15,
         "category": "commonsense"
     },
     {
@@ -43,6 +43,13 @@ DATASET_CONFIGS = [
         "split":   "train",
         "weight":  0.10,
         "category": "strategy"
+    },
+    {
+        "name":    "rajat5039/wiki-multihop-qa-500k",
+        "config":  None,
+        "split":   "train",
+        "weight":  0.20,
+        "category": "factual_multihop"
     },
 ]
 
@@ -119,12 +126,21 @@ def extract_strategyqa(sample: Dict) -> Dict:
     }
 
 
+def extract_wiki_multihop(sample: Dict) -> Dict:
+    return {
+        "question": sample["question"].strip(),
+        "answer":   sample["answer"].strip(),
+        "category": "factual_multihop"
+    }
+
+
 EXTRACTORS = {
     "hotpot_qa":            extract_hotpotqa,
     "gsm8k":                extract_gsm8k,
     "commonsense_qa":       extract_commonsenseqa,
     "ai2_arc":              extract_arc,
     "allenai/strategy_qa":  extract_strategyqa,
+    "rajat5039/wiki-multihop-qa-500k": extract_wiki_multihop,
 }
 
 
@@ -148,7 +164,7 @@ def difficulty_score(question: str) -> int:
 
 
 class InterleavedQADataset(IterableDataset):
-    """Streams from all 5 datasets simultaneously, sampling by weight."""
+    """Streams from all 6 datasets simultaneously, sampling by weight."""
 
     def __init__(self, cfg, tokenizer: PreTrainedTokenizer):
         super().__init__()

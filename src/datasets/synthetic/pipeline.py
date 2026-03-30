@@ -300,6 +300,7 @@ def merge_with_public(
         ("commonsense_qa",       None,         "train"),
         ("ai2_arc",             "ARC-Challenge", "train"),
         ("allenai/strategy_qa",  None,         "train"),
+        ("rajat5039/wiki-multihop-qa-500k", None, "train"),
     ]:
         name, config, split = ds_config
         kwargs = {"split": split}

@@ -9,6 +9,7 @@ from types import SimpleNamespace
 from src.datasets.qa_datasets import (
     extract_gsm8k, extract_commonsenseqa,
     extract_arc, extract_strategyqa,
+    extract_wiki_multihop,
     difficulty_score
 )
 
@@ -75,6 +76,11 @@ class TestExtractors:
         result = extract_strategyqa(sample)
         assert result["answer"] == "no"
 
+    def test_wiki_multihop(self):
+        sample = {"question": "Who was born first?", "answer": "Albert"}
+        result = extract_wiki_multihop(sample)
+        assert result["answer"] == "Albert"
+        assert result["category"] == "factual_multihop"
 
 class TestDifficultyScore:
 
