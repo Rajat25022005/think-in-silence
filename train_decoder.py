@@ -45,7 +45,7 @@ def main():
     device = get_device()
     logger.info(f"Device: {device} | Config: {args.config}")
 
-    model     = LCThought(cfg, vocab_size=30522).to(device)
+    model     = LCThought(cfg).to(device)
     tokenizer = model.encoder.tokenizer
 
     if args.stage1_ckpt:

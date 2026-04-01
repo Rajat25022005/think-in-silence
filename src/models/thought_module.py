@@ -16,7 +16,7 @@ class ThoughtModule(nn.Module):
 
         if shared:
             block = ThoughtBlock(dim, n_heads, ffn_dim, dropout)
-            self.blocks = nn.ModuleList([block] * n_steps)
+            self.blocks = nn.ModuleList([block for _ in range(n_steps)])
         else:
             self.blocks = nn.ModuleList(
                 [ThoughtBlock(dim, n_heads, ffn_dim, dropout) for _ in range(n_steps)]
@@ -55,4 +55,4 @@ class ThoughtModule(nn.Module):
         return h
 
     def predict(self, h: torch.Tensor) -> torch.Tensor:
-        return self.predictor(h.squeeze(1))
+        return self.predictor(h.mean(dim=1))

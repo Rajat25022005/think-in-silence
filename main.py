@@ -44,7 +44,7 @@ def main():
     logger.info(f"Config: {args.config}")
 
     tokenizer  = None
-    model      = LCThought(cfg, vocab_size=30522).to(device)
+    model      = LCThought(cfg).to(device)
     tokenizer  = model.encoder.tokenizer
 
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)

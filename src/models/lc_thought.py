@@ -21,11 +21,15 @@ class LCThought(nn.Module):
     LCThought receives the teacher as an argument in stage1 forward.
     """
 
-    def __init__(self, cfg, vocab_size: int):
+    def __init__(self, cfg, vocab_size: int = None):
         super().__init__()
         self.cfg      = cfg
         self.encoder  = FrozenEncoder(cfg)
         self.thought  = ThoughtModule(cfg)
+        
+        if vocab_size is None:
+            vocab_size = len(self.encoder.tokenizer)
+            
         self.decoder  = LatentDecoder(cfg, vocab_size)
         self.mse_loss = nn.MSELoss()
 

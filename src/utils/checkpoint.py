@@ -40,7 +40,7 @@ def load_checkpoint(
     teacher_model=None,
     device: str = "cpu"
 ) -> int:
-    ckpt = torch.load(path, map_location=device)
+    ckpt = torch.load(path, map_location=device, weights_only=True)
     model.load_state_dict(ckpt["model"])
 
     if optimizer is not None and "optimizer" in ckpt:

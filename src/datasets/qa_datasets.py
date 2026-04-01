@@ -242,11 +242,15 @@ def build_dataloader(cfg, tokenizer: PreTrainedTokenizer) -> DataLoader:
     """Build the training DataLoader."""
     dataset = InterleavedQADataset(cfg, tokenizer)
 
+    import os
+    num_workers = max(4, os.cpu_count() // 2) if hasattr(os, "cpu_count") and os.cpu_count() else 4
+
     loader = DataLoader(
         dataset,
         batch_size=cfg.training.batch_size,
-        num_workers=2,
+        num_workers=num_workers,
         pin_memory=True,
+        prefetch_factor=2 if num_workers > 0 else None
     )
 
     return loader

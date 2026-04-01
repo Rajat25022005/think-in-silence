@@ -35,12 +35,12 @@ class FrozenEncoder(nn.Module):
     def encode_question(self, input_ids: torch.Tensor,
                         attention_mask: torch.Tensor) -> torch.Tensor:
         seq = self.backbone.forward_sequence(input_ids, attention_mask)
-        return self.question_proj(seq)
+        return self.question_proj(seq.to(self.question_proj[0].weight.dtype))
 
     def encode_answer(self, input_ids: torch.Tensor,
                       attention_mask: torch.Tensor) -> torch.Tensor:
         pooled = self.backbone.forward_pooled(input_ids, attention_mask)
-        return self.answer_proj(pooled)
+        return self.answer_proj(pooled.to(self.answer_proj[0].weight.dtype))
 
     @property
     def tokenizer(self):

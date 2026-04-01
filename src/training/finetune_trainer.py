@@ -20,14 +20,16 @@ def train_stage3(model, dataloader, cfg, device, resume: bool = True):
         weight_decay=0.01,
         betas=(0.9, 0.999)
     )
-    scaler     = GradScaler(enabled=device.type == "cuda")
+    amp_dtype  = torch.bfloat16
+    scaler     = GradScaler(enabled=(device.type == "cuda" and amp_dtype == torch.float16))
     metric_log = MetricLogger(
         use_wandb=getattr(cfg, "wandb", False),
         project="think-in-silence",
         run_name="stage3"
     )
 
-    ckpt_dir = cfg.training.ckpt_dir.replace("stage1", "stage3")
+    import os
+    ckpt_dir = getattr(cfg.training, "stage3_ckpt_dir", os.path.join(os.path.dirname(cfg.training.ckpt_dir.rstrip("/")), "stage3"))
     step     = 0
     if resume:
         ckpt = latest_checkpoint(ckpt_dir)
@@ -54,13 +56,16 @@ def train_stage3(model, dataloader, cfg, device, resume: bool = True):
         for pg in optimizer.param_groups:
             pg["lr"] = lr
 
-        with autocast(enabled=device.type == "cuda", dtype=torch.bfloat16):
+        with autocast(enabled=device.type == "cuda", dtype=amp_dtype):
             loss, pred, target, logits = model(q_ids, q_mask, a_ids, a_mask, mode="stage3")
 
         optimizer.zero_grad(set_to_none=True)
         scaler.scale(loss).backward()
         scaler.unscale_(optimizer)
-        torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.training.grad_clip)
+        torch.nn.utils.clip_grad_norm_(
+            filter(lambda p: p.grad is not None, model.parameters()),
+            cfg.training.grad_clip
+        )
         scaler.step(optimizer)
         scaler.update()
 

@@ -30,7 +30,8 @@ def train_stage1(model, dataloader, cfg, device, resume: bool = True):
         weight_decay=0.04,
         betas=(0.9, 0.999)
     )
-    scaler     = GradScaler(enabled=device.type == "cuda")
+    amp_dtype = torch.bfloat16
+    scaler    = GradScaler(enabled=(device.type == "cuda" and amp_dtype == torch.float16))
     metric_log = MetricLogger(
         use_wandb=getattr(cfg, "wandb", False),
         project="think-in-silence",
@@ -67,7 +68,7 @@ def train_stage1(model, dataloader, cfg, device, resume: bool = True):
         for pg in optimizer.param_groups:
             pg["lr"] = lr
 
-        with autocast(enabled=device.type == "cuda", dtype=torch.bfloat16):
+        with autocast(enabled=device.type == "cuda", dtype=amp_dtype):
             # Pass teacher so stage1 uses EMA answer embeddings as targets
             loss, pred, target = model(
                 q_ids, q_mask, a_ids, a_mask,
@@ -78,7 +79,10 @@ def train_stage1(model, dataloader, cfg, device, resume: bool = True):
         optimizer.zero_grad(set_to_none=True)
         scaler.scale(loss).backward()
         scaler.unscale_(optimizer)
-        torch.nn.utils.clip_grad_norm_(model.parameters(), cfg.training.grad_clip)
+        torch.nn.utils.clip_grad_norm_(
+            filter(lambda p: p.grad is not None, model.parameters()),
+            cfg.training.grad_clip
+        )
         scaler.step(optimizer)
         scaler.update()
 
