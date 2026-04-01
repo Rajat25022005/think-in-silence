@@ -1,16 +1,14 @@
 """
-Tests for the data pipeline.
+tests/test_dataloader.py
+
 Run: python -m pytest tests/test_dataloader.py -v
 """
 
 import pytest
-import torch
-from types import SimpleNamespace
 from src.datasets.qa_datasets import (
     extract_gsm8k, extract_commonsenseqa,
     extract_arc, extract_strategyqa,
-    extract_wiki_multihop,
-    difficulty_score
+    extract_wiki_multihop, difficulty_score
 )
 
 
@@ -19,7 +17,7 @@ class TestExtractors:
     def test_gsm8k_extracts_number(self):
         sample = {
             "question": "A train goes 60 mph for 2 hours. How far?",
-            "answer":   "The train travels 60 × 2 = 120 miles.\n#### 120"
+            "answer":   "The train travels 60 x 2 = 120 miles.\n#### 120"
         }
         result = extract_gsm8k(sample)
         assert result["answer"] == "120"
@@ -77,10 +75,14 @@ class TestExtractors:
         assert result["answer"] == "no"
 
     def test_wiki_multihop(self):
-        sample = {"question": "Who was born first?", "answer": "Albert"}
+        sample = {
+            "question": "In which city did the physicist born in Warsaw work?",
+            "answer":   "Paris"
+        }
         result = extract_wiki_multihop(sample)
-        assert result["answer"] == "Albert"
+        assert result["answer"] == "Paris"
         assert result["category"] == "factual_multihop"
+
 
 class TestDifficultyScore:
 

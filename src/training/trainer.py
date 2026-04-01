@@ -11,6 +11,7 @@ logger = get_logger()
 
 
 def build_teacher(model):
+    """Deep-copy student → freeze → return as EMA teacher."""
     teacher = copy.deepcopy(model)
     for p in teacher.parameters():
         p.requires_grad = False
@@ -19,14 +20,17 @@ def build_teacher(model):
 
 
 def train_stage1(model, dataloader, cfg, device, resume: bool = True):
-    teacher   = build_teacher(model)
+    # Teacher is a frozen EMA copy of the student
+    # It encodes answers to provide stable regression targets (JEPA objective)
+    teacher = build_teacher(model)
+
     optimizer = torch.optim.AdamW(
         model.parameters(),
         lr=cfg.training.lr,
         weight_decay=0.04,
         betas=(0.9, 0.999)
     )
-    scaler    = GradScaler(enabled=device.type == "cuda")
+    scaler     = GradScaler(enabled=device.type == "cuda")
     metric_log = MetricLogger(
         use_wandb=getattr(cfg, "wandb", False),
         project="think-in-silence",
@@ -38,10 +42,13 @@ def train_stage1(model, dataloader, cfg, device, resume: bool = True):
     if resume:
         ckpt = latest_checkpoint(cfg.training.ckpt_dir)
         if ckpt:
-            step = load_checkpoint(ckpt, model, optimizer, scaler, teacher, device=str(device))
+            step = load_checkpoint(
+                ckpt, model, optimizer, scaler, teacher, device=str(device)
+            )
             logger.info(f"Resumed from {ckpt} at step {step}")
 
     model.train()
+    teacher.eval()
     data_iter = iter(dataloader)
 
     while step < cfg.training.max_steps:
@@ -61,7 +68,12 @@ def train_stage1(model, dataloader, cfg, device, resume: bool = True):
             pg["lr"] = lr
 
         with autocast(enabled=device.type == "cuda", dtype=torch.bfloat16):
-            loss, pred, target = model(q_ids, q_mask, a_ids, a_mask, mode="stage1")
+            # Pass teacher so stage1 uses EMA answer embeddings as targets
+            loss, pred, target = model(
+                q_ids, q_mask, a_ids, a_mask,
+                mode="stage1",
+                teacher=teacher       # ← key fix: teacher provides stable targets
+            )
 
         optimizer.zero_grad(set_to_none=True)
         scaler.scale(loss).backward()
@@ -70,6 +82,7 @@ def train_stage1(model, dataloader, cfg, device, resume: bool = True):
         scaler.step(optimizer)
         scaler.update()
 
+        # Update EMA teacher after every student step
         momentum = get_ema_momentum(step, cfg)
         update_ema(model, teacher, momentum)
 
@@ -79,14 +92,19 @@ def train_stage1(model, dataloader, cfg, device, resume: bool = True):
             metrics = {
                 "train/loss":         loss.item(),
                 "train/lr":           lr,
-                "train/ema_momentum": momentum
+                "train/ema_momentum": momentum,
             }
             metric_log.log(metrics, step=step)
-            logger.info(f"step={step:6d}  loss={loss.item():.4f}  lr={lr:.2e}  ema={momentum:.4f}")
+            logger.info(
+                f"step={step:6d}  loss={loss.item():.4f}  "
+                f"lr={lr:.2e}  ema={momentum:.4f}"
+            )
 
         if step % cfg.training.ckpt_every == 0:
-            path = save_checkpoint(model, optimizer, scaler, step,
-                                   cfg.training.ckpt_dir, teacher_model=teacher)
+            path = save_checkpoint(
+                model, optimizer, scaler, step,
+                cfg.training.ckpt_dir, teacher_model=teacher
+            )
             logger.info(f"Checkpoint saved: {path}")
 
     metric_log.finish()
