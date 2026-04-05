@@ -24,6 +24,7 @@ No tokens. No chain-of-thought labels. No reinforcement learning.
 [![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=flat-square&logo=python&logoColor=white)](https://python.org)
 [![PyTorch](https://img.shields.io/badge/PyTorch-2.2+-EE4C2C?style=flat-square&logo=pytorch&logoColor=white)](https://pytorch.org)
 [![HuggingFace](https://img.shields.io/badge/🤗_Transformers-4.38+-FFD21E?style=flat-square)](https://huggingface.co)
+[![HuggingFace](https://img.shields.io/badge/🤗_Model-rajat5039/think--in--silence-FFD21E?style=flat-square)](https://huggingface.co/rajat5039/think-in-silence)
 [![License](https://img.shields.io/badge/License-MIT-22C55E?style=flat-square)](LICENSE)
 
 </div>
