@@ -14,6 +14,9 @@ evaluate==0.4.1
 bert-score==0.3.13
 bitsandbytes==0.42.0
 accelerate==0.27.0
+<<<<<<< HEAD
 rouge_score
 nltk 
 absl-py
+=======
+>>>>>>> 2cdc3535e6807cb71b790072d14a7e68f44f5346
