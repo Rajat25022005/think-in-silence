@@ -10,35 +10,35 @@ from transformers import PreTrainedTokenizer
 
 DATASET_CONFIGS = [
     {
-        "name":    "hotpot_qa",
+        "name":    "hotpotqa/hotpot_qa",
         "config":  "distractor",
         "split":   "train",
         "weight":  0.20,
         "category": "factual_multihop"
     },
     {
-        "name":    "gsm8k",
+        "name":    "openai/gsm8k",
         "config":  "main",
         "split":   "train",
         "weight":  0.20,
         "category": "math"
     },
     {
-        "name":    "commonsense_qa",
+        "name":    "tau/commonsense_qa",
         "config":  None,
         "split":   "train",
         "weight":  0.15,
         "category": "commonsense"
     },
     {
-        "name":    "ai2_arc",
+        "name":    "allenai/ai2_arc",
         "config":  "ARC-Challenge",
         "split":   "train",
         "weight":  0.15,
         "category": "science"
     },
     {
-        "name":    "allenai/strategy_qa",
+        "name":    "nguyen-brat/strategy_qa",
         "config":  None,
         "split":   "train",
         "weight":  0.10,
@@ -135,11 +135,21 @@ def extract_wiki_multihop(sample: Dict) -> Dict:
 
 
 EXTRACTORS = {
-    "hotpot_qa":            extract_hotpotqa,
-    "gsm8k":                extract_gsm8k,
-    "commonsense_qa":       extract_commonsenseqa,
-    "ai2_arc":              extract_arc,
-    "allenai/strategy_qa":  extract_strategyqa,
+    "hotpot_qa":                    extract_hotpotqa,
+    "hotpotqa/hotpot_qa":           extract_hotpotqa,   
+
+    "gsm8k":                        extract_gsm8k,
+    "openai/gsm8k":                 extract_gsm8k, 
+
+    "commonsense_qa":               extract_commonsenseqa,
+    "tau/commonsense_qa":           extract_commonsenseqa,
+
+    "ai2_arc":                      extract_arc,
+    "allenai/ai2_arc":              extract_arc,
+
+    "allenai/strategy_qa":          extract_strategyqa,
+    "nguyen-brat/strategy_qa":      extract_strategyqa,
+
     "rajat5039/wiki-multihop-qa-500k": extract_wiki_multihop,
 }
 
@@ -242,8 +252,7 @@ def build_dataloader(cfg, tokenizer: PreTrainedTokenizer) -> DataLoader:
     """Build the training DataLoader."""
     dataset = InterleavedQADataset(cfg, tokenizer)
 
-    import os
-    num_workers = max(4, os.cpu_count() // 2) if hasattr(os, "cpu_count") and os.cpu_count() else 4
+    num_workers = getattr(cfg.training, "num_workers", 0)
 
     loader = DataLoader(
         dataset,

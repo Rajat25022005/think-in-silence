@@ -1,3 +1,4 @@
+import os
 import torch
 from torch.cuda.amp import GradScaler, autocast
 
@@ -9,14 +10,32 @@ from src.utils.logging       import get_logger, MetricLogger
 logger = get_logger()
 
 
+STAGE3_LR_SCALE = 0.1
+
+
 def train_stage3(model, dataloader, cfg, device, resume: bool = True):
-    for param in model.parameters():
+    # Unfreeze only thought module, projections, and decoder
+    # Keep backbone frozen — it was frozen for a reason
+    for param in model.thought.parameters():
         param.requires_grad = True
-    logger.info("All parameters unfrozen for stage 3 joint fine-tuning")
+    for param in model.encoder.question_proj.parameters():
+        param.requires_grad = True
+    for param in model.encoder.answer_proj.parameters():
+        param.requires_grad = True
+    for param in model.decoder.parameters():
+        param.requires_grad = True
+    for param in model.encoder.backbone.parameters():
+        param.requires_grad = False
+
+    n_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    logger.info(
+        f"Stage 3: thought + projections + decoder unfrozen, backbone stays frozen. "
+        f"Trainable params: {n_trainable:,}"
+    )
 
     optimizer = torch.optim.AdamW(
-        model.parameters(),
-        lr=cfg.training.lr * 0.1,
+        filter(lambda p: p.requires_grad, model.parameters()),
+        lr=cfg.training.lr * STAGE3_LR_SCALE,
         weight_decay=0.01,
         betas=(0.9, 0.999)
     )
@@ -28,9 +47,11 @@ def train_stage3(model, dataloader, cfg, device, resume: bool = True):
         run_name="stage3"
     )
 
-    import os
-    ckpt_dir = getattr(cfg.training, "stage3_ckpt_dir", os.path.join(os.path.dirname(cfg.training.ckpt_dir.rstrip("/")), "stage3"))
-    step     = 0
+    ckpt_dir = getattr(
+        cfg.training, "stage3_ckpt_dir",
+        os.path.join(os.path.dirname(cfg.training.ckpt_dir.rstrip("/")), "stage3")
+    )
+    step = 0
     if resume:
         ckpt = latest_checkpoint(ckpt_dir)
         if ckpt:
@@ -38,6 +59,7 @@ def train_stage3(model, dataloader, cfg, device, resume: bool = True):
             logger.info(f"Resumed from {ckpt} at step {step}")
 
     model.train()
+    model.encoder.backbone.eval()   # keep backbone in eval mode always
     data_iter = iter(dataloader)
 
     while step < cfg.training.max_steps:
@@ -52,12 +74,14 @@ def train_stage3(model, dataloader, cfg, device, resume: bool = True):
         a_ids  = batch["a_ids"].to(device)
         a_mask = batch["a_mask"].to(device)
 
-        lr = get_lr(step, cfg)
+        lr = get_lr(step, cfg) * STAGE3_LR_SCALE
         for pg in optimizer.param_groups:
             pg["lr"] = lr
 
         with autocast(enabled=device.type == "cuda", dtype=amp_dtype):
-            loss, pred, target, logits = model(q_ids, q_mask, a_ids, a_mask, mode="stage3")
+            loss, pred, target, logits = model(
+                q_ids, q_mask, a_ids, a_mask, mode="stage3"
+            )
 
         optimizer.zero_grad(set_to_none=True)
         scaler.scale(loss).backward()
