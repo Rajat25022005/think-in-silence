@@ -46,14 +46,10 @@ class LCThought(nn.Module):
     ):
         if mode == "stage1":
             # ── Student: question → latent thought → prediction ──────────
-            ctx  = self.encoder.encode_question(q_ids, q_mask)
-            h    = self.thought(ctx, n_steps=n_steps,
-                                return_all_states=return_all_states)
-
-            if return_all_states:
-                pred = self.thought.predict(h[:, -1, :].unsqueeze(1))
-            else:
-                pred = self.thought.predict(h)
+            from src.training.losses import jepa_loss
+            ctx    = self.encoder.encode_question(q_ids, q_mask)
+            states = self.thought(ctx, n_steps=n_steps, return_all_states=True)
+            # states: (B, K+1, 1, dim)
 
             # ── Teacher: answer → target embedding (EMA, no grad) ────────
             if teacher is not None:
@@ -64,15 +60,27 @@ class LCThought(nn.Module):
                 # Fallback (testing only) — uses student encoder
                 target = self.encoder.encode_answer(a_ids, a_mask)
 
-            loss = self.mse_loss(pred, target.detach())
+            K      = states.shape[1]
+            weights = torch.linspace(0.1, 1.0, K, device=states.device)
+            loss    = 0
+            for i, w in enumerate(weights):
+                h_i    = states[:, i, :, :]          # (B, 1, dim)
+                pred_i = self.thought.predict(h_i)
+                loss  += w * jepa_loss(pred_i, target)
+            loss = loss / weights.sum()
+
+            pred = self.thought.predict(states[:, -1, :, :])  # final pred for return
+
             return loss, pred, target
 
         elif mode == "stage2":
             # ThoughtModule frozen externally in decoder_trainer.py
             ctx = self.encoder.encode_question(q_ids, q_mask)
             with torch.no_grad():
-                h = self.thought(ctx, n_steps=n_steps)
-            logits = self.decoder(a_ids[:, :-1], h)
+                h = self.thought(ctx, n_steps=n_steps)      # (B, 1, dim)
+            h_expanded = h.expand(-1, 4, -1)                # (B, 4, dim)
+            logits = self.decoder(a_ids[:, :-1], h_expanded)
+
             loss   = F.cross_entropy(
                 logits.reshape(-1, logits.size(-1)),
                 a_ids[:, 1:].reshape(-1),

@@ -3,7 +3,10 @@ import torch.nn.functional as F
 
 
 def jepa_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-    return F.mse_loss(pred, target.detach())
+    mse  = F.mse_loss(pred, target.detach())
+    cos  = 1 - F.cosine_similarity(pred, target.detach(), dim=-1).mean()
+    return mse + 0.5 * cos   # cosine weighted at 0.5 — tune if needed
+
 
 
 def decoder_loss(logits: torch.Tensor, target_ids: torch.Tensor,

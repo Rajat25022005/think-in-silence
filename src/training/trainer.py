@@ -1,4 +1,5 @@
 import copy
+import random
 import torch
 from torch.cuda.amp import GradScaler, autocast
 
@@ -6,6 +7,7 @@ from src.training.schedulers import get_lr, get_ema_momentum, update_ema
 from src.utils.checkpoint    import save_checkpoint, load_checkpoint, latest_checkpoint
 from src.utils.logging       import get_logger, MetricLogger
 
+K_SCHEDULE = [1, 2, 4, 8, 16]
 
 logger = get_logger()
 
@@ -31,7 +33,7 @@ def train_stage1(model, dataloader, cfg, device, resume: bool = True):
         betas=(0.9, 0.999)
     )
     amp_dtype = torch.bfloat16
-    scaler    = GradScaler(enabled=(device.type == "cuda" and amp_dtype == torch.float16))
+    scaler    = torch.amp.GradScaler("cuda", enabled=(device.type == "cuda" and amp_dtype == torch.float16))
     metric_log = MetricLogger(
         use_wandb=getattr(cfg, "wandb", False),
         project="think-in-silence",
@@ -49,6 +51,7 @@ def train_stage1(model, dataloader, cfg, device, resume: bool = True):
             logger.info(f"Resumed from {ckpt} at step {step}")
 
     model.train()
+    model.encoder.backbone.model.eval()   # ← add this line
     teacher.eval()
     data_iter = iter(dataloader)
 
@@ -68,13 +71,16 @@ def train_stage1(model, dataloader, cfg, device, resume: bool = True):
         for pg in optimizer.param_groups:
             pg["lr"] = lr
 
-        with autocast(enabled=device.type == "cuda", dtype=amp_dtype):
+        k = random.choice(K_SCHEDULE)
+        with torch.amp.autocast("cuda", enabled=device.type == "cuda", dtype=amp_dtype):
             # Pass teacher so stage1 uses EMA answer embeddings as targets
             loss, pred, target = model(
                 q_ids, q_mask, a_ids, a_mask,
                 mode="stage1",
-                teacher=teacher       # ← key fix: teacher provides stable targets
+                teacher=teacher,       # ← key fix: teacher provides stable targets
+                n_steps=k
             )
+        metric_log.log({'train/k': k}, step=step)   # log which k was used
 
         optimizer.zero_grad(set_to_none=True)
         scaler.scale(loss).backward()

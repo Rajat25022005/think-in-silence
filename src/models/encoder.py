@@ -18,6 +18,9 @@ class FrozenEncoder(nn.Module):
         elif backbone_name == "llama":
             from src.models.backbones.llama_encoder import LlamaEncoderBackbone
             self.backbone = LlamaEncoderBackbone()
+        elif backbone_name == "gemma3":
+            from src.models.backbones.gemma3 import Gemma3Backbone
+            self.backbone = Gemma3Backbone()
         else:
             raise ValueError(f"Unknown backbone: {backbone_name}")
 

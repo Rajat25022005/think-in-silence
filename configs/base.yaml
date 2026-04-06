@@ -1,5 +1,5 @@
 model:
-  backbone: "bge_large"
+  backbone: "gemma3"
   n_steps: 8
   proj_dim: 256
   n_heads: 4
@@ -10,11 +10,11 @@ model:
 training:
   stage: 1
   max_steps: 100000
-  batch_size: 64
+  batch_size: 32
   lr: 1.0e-4
   warmup_steps: 2000
   grad_clip: 1.0
-  ema_momentum_start: 0.990
+  ema_momentum_start: 0.996
   ema_momentum_end: 0.9999
   log_every: 100
   ckpt_every: 5000

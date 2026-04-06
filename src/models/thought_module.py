@@ -24,10 +24,15 @@ class ThoughtModule(nn.Module):
 
         self.h0 = nn.Parameter(torch.zeros(1, 1, dim))
         nn.init.trunc_normal_(self.h0, std=0.02)
+        
+        self.step_emb = nn.Embedding(32, dim)   # supports up to K=32
 
         self.predictor = nn.Sequential(
             nn.LayerNorm(dim),
-            nn.Linear(dim, dim)
+            nn.Linear(dim, dim * 2),
+            nn.GELU(),
+            nn.Dropout(0.1),
+            nn.Linear(dim * 2, dim),
         )
 
         self.n_steps = n_steps
@@ -45,6 +50,8 @@ class ThoughtModule(nn.Module):
         states = [h]
 
         for k in range(K):
+            step_vec = self.step_emb(torch.tensor(k, device=ctx.device))
+            h = h + step_vec.unsqueeze(0).unsqueeze(0)   # broadcast to (B,1,dim)
             block = self.blocks[k % len(self.blocks)]
             h     = block(h, ctx)
             states.append(h)
@@ -55,4 +62,5 @@ class ThoughtModule(nn.Module):
         return h
 
     def predict(self, h: torch.Tensor) -> torch.Tensor:
-        return self.predictor(h.mean(dim=1))
+        # Apply MLP to each token, then mean-pool
+        return self.predictor(h).mean(dim=1)   # (B, dim)

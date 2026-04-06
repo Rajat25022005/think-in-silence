@@ -13,42 +13,42 @@ DATASET_CONFIGS = [
         "name":    "hotpotqa/hotpot_qa",
         "config":  "distractor",
         "split":   "train",
-        "weight":  0.20,
+        "weight":  0.30,
         "category": "factual_multihop"
     },
     {
         "name":    "openai/gsm8k",
         "config":  "main",
         "split":   "train",
-        "weight":  0.20,
+        "weight":  0.15,
         "category": "math"
     },
     {
         "name":    "tau/commonsense_qa",
         "config":  None,
         "split":   "train",
-        "weight":  0.15,
+        "weight":  0.12,
         "category": "commonsense"
     },
     {
         "name":    "allenai/ai2_arc",
         "config":  "ARC-Challenge",
         "split":   "train",
-        "weight":  0.15,
+        "weight":  0.12,
         "category": "science"
     },
     {
         "name":    "nguyen-brat/strategy_qa",
         "config":  None,
         "split":   "train",
-        "weight":  0.10,
+        "weight":  0.19,
         "category": "strategy"
     },
     {
         "name":    "rajat5039/wiki-multihop-qa-500k",
         "config":  None,
         "split":   "train",
-        "weight":  0.20,
+        "weight":  0.22,
         "category": "factual_multihop"
     },
 ]
@@ -173,6 +173,8 @@ def difficulty_score(question: str) -> int:
     return 0
 
 
+from src.datasets.preprocessing.difficulty_filter import enforce_multihop_ratio
+
 class InterleavedQADataset(IterableDataset):
     """Streams from all 6 datasets simultaneously, sampling by weight."""
 
@@ -213,39 +215,47 @@ class InterleavedQADataset(IterableDataset):
         extractors  = [EXTRACTORS[d["name"]] for d in DATASET_CONFIGS]
 
         while True:
-            idx = random.choices(range(len(self.names)), weights=self.weights, k=1)[0]
+            buffer = []
+            while len(buffer) < 1000:
+                idx = random.choices(range(len(self.names)), weights=self.weights, k=1)[0]
 
-            try:
-                raw = next(iterators[idx])
-            except StopIteration:
-                iterators[idx] = iter(datasets[idx])
                 try:
                     raw = next(iterators[idx])
                 except StopIteration:
+                    iterators[idx] = iter(datasets[idx])
+                    try:
+                        raw = next(iterators[idx])
+                    except StopIteration:
+                        continue
+
+                try:
+                    sample = extractors[idx](raw)
+                except (KeyError, TypeError):
                     continue
 
-            try:
-                sample = extractors[idx](raw)
-            except (KeyError, TypeError):
-                continue
-
-            if not sample["answer"] or not sample["question"]:
-                continue
-
-            if self.min_diff > 0:
-                if difficulty_score(sample["question"]) < self.min_diff:
+                if not sample["answer"] or not sample["question"]:
                     continue
 
-            q_enc = self._tokenize(sample["question"], self.max_q_len)
-            a_enc = self._tokenize(sample["answer"],   self.max_a_len)
+                score = difficulty_score(sample["question"])
+                if self.min_diff > 0 and score < self.min_diff:
+                    continue
+                
+                sample["difficulty_score"] = score
+                buffer.append(sample)
 
-            yield {
-                "q_ids":    q_enc["input_ids"].squeeze(0),
-                "q_mask":   q_enc["attention_mask"].squeeze(0),
-                "a_ids":    a_enc["input_ids"].squeeze(0),
-                "a_mask":   a_enc["attention_mask"].squeeze(0),
-                "category": sample["category"],
-            }
+            buffer = enforce_multihop_ratio(buffer, target_multihop_ratio=0.70)
+
+            for sample in buffer:
+                q_enc = self._tokenize(sample["question"], self.max_q_len)
+                a_enc = self._tokenize(sample["answer"],   self.max_a_len)
+
+                yield {
+                    "q_ids":    q_enc["input_ids"].squeeze(0),
+                    "q_mask":   q_enc["attention_mask"].squeeze(0),
+                    "a_ids":    a_enc["input_ids"].squeeze(0),
+                    "a_mask":   a_enc["attention_mask"].squeeze(0),
+                    "category": sample["category"],
+                }
 
 
 def build_dataloader(cfg, tokenizer: PreTrainedTokenizer) -> DataLoader:

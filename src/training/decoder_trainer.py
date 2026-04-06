@@ -72,7 +72,12 @@ def train_stage2(model, dataloader, cfg, device, resume: bool = True):
         step += 1
 
         if step % cfg.training.log_every == 0:
-            metric_log.log({"train/loss": loss.item(), "train/lr": lr}, step=step)
+            non_pad = (a_ids[:, 1:] != 0).sum().item()
+            metric_log.log({
+                "train/loss": loss.item(),
+                "train/lr": lr,
+                "train/non_pad_tokens": non_pad,
+            }, step=step)
             logger.info(f"step={step:6d}  loss={loss.item():.4f}  lr={lr:.2e}")
 
         if step % cfg.training.ckpt_every == 0:
