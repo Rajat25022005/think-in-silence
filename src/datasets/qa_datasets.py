@@ -260,16 +260,20 @@ class InterleavedQADataset(IterableDataset):
 
 def build_dataloader(cfg, tokenizer: PreTrainedTokenizer) -> DataLoader:
     """Build the training DataLoader."""
+    from src.utils.device import is_tpu
+
     dataset = InterleavedQADataset(cfg, tokenizer)
 
     num_workers = getattr(cfg.training, "num_workers", 0)
+    _on_tpu = is_tpu()
 
     loader = DataLoader(
         dataset,
         batch_size=cfg.training.batch_size,
         num_workers=num_workers,
-        pin_memory=True,
-        prefetch_factor=2 if num_workers > 0 else None
+        pin_memory=not _on_tpu,
+        prefetch_factor=2 if num_workers > 0 else None,
+        drop_last=_on_tpu,  # TPU requires fixed batch shapes
     )
 
     return loader

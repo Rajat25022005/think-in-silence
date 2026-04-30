@@ -4,6 +4,18 @@ from typing import Optional
 
 import torch
 
+from src.utils.device import is_tpu
+
+
+def _cleanup_old_checkpoints(ckpt_dir: str, keep_last_n: int = 3):
+    """Delete all but the most recent `keep_last_n` checkpoints."""
+    ckpt_path = Path(ckpt_dir)
+    checkpoints = sorted(ckpt_path.glob("step_*.pt"))
+    if len(checkpoints) <= keep_last_n:
+        return
+    for old_ckpt in checkpoints[:-keep_last_n]:
+        old_ckpt.unlink(missing_ok=True)
+
 
 def save_checkpoint(
     model,
@@ -12,7 +24,8 @@ def save_checkpoint(
     step: int,
     ckpt_dir: str,
     teacher_model=None,
-    extra: Optional[dict] = None
+    extra: Optional[dict] = None,
+    keep_last_n: int = 3,
 ):
     Path(ckpt_dir).mkdir(parents=True, exist_ok=True)
     path = os.path.join(ckpt_dir, f"step_{step:07d}.pt")
@@ -28,7 +41,13 @@ def save_checkpoint(
     if extra:
         payload.update(extra)
 
-    torch.save(payload, path)
+    if is_tpu():
+        import torch_xla.core.xla_model as xm
+        xm.save(payload, path)
+    else:
+        torch.save(payload, path)
+
+    _cleanup_old_checkpoints(ckpt_dir, keep_last_n=keep_last_n)
     return path
 
 
@@ -40,7 +59,7 @@ def load_checkpoint(
     teacher_model=None,
     device: str = "cpu"
 ) -> int:
-    ckpt = torch.load(path, map_location=device, weights_only=True)
+    ckpt = torch.load(path, map_location=device, weights_only=False)
     model.load_state_dict(ckpt["model"])
 
     if optimizer is not None and "optimizer" in ckpt:

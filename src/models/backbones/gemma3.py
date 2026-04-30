@@ -11,8 +11,7 @@ class Gemma3Backbone(nn.Module):
         self.tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
         self.model = AutoModelForCausalLM.from_pretrained(
             MODEL_NAME,
-            dtype=torch.bfloat16,
-            device_map='auto',
+            torch_dtype=torch.bfloat16,
             output_hidden_states=True
         )
         self.output_dim = OUTPUT_DIM
@@ -28,7 +27,7 @@ class Gemma3Backbone(nn.Module):
     def _last_token_pool(hidden, mask):
         # Last non-padding token — correct for causal LLMs
         last_idx = mask.sum(dim=1) - 1
-        return hidden[torch.arange(hidden.size(0)), last_idx]
+        return hidden[torch.arange(hidden.size(0), device=hidden.device), last_idx]
 
     @torch.no_grad()
     def forward_sequence(self, input_ids, attention_mask):
